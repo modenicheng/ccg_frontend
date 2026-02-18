@@ -4,6 +4,7 @@ export const EventType = {
   AUDIO_FRAME: 1,
   META_DATA: 2,
   HEARTBEAT: 3,
+  TIME_SYNC: 4,
   MESSAGE: 255, // for error handling
 } as const;
 

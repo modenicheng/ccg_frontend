@@ -16,6 +16,7 @@ class WS {
   private reconnectTimeout?: number;
   private closed: boolean = false;
   private handlers: Map<EventType, Handler<ArrayBuffer | string>> = new Map();
+  private stateChangeCallback?: (connected: boolean) => void;
 
   constructor(url: string, retryConfig?: Partial<retryConfig>) {
     this.url = url;
@@ -41,17 +42,28 @@ class WS {
     this.handlers.delete(eventType);
   }
 
+  // Register a callback for connection state changes
+  onConnectionStateChange(callback: (connected: boolean) => void) {
+    this.stateChangeCallback = callback;
+  }
+
   private connect() {
     this.conn = new WebSocket(this.url);
     this.conn.onopen = (ev: Event) => {
       console.log(`Websocket connected.`);
       console.debug(ev);
       this.retryCount = 0;
+      if (this.stateChangeCallback) {
+        this.stateChangeCallback(true);
+      }
     };
     this.conn.onclose = (ev: Event) => {
       console.log(`Websocket disconnected.`);
       console.debug(ev);
       this.conn = undefined;
+      if (this.stateChangeCallback) {
+        this.stateChangeCallback(false);
+      }
       this.reconnect();
     };
     this.conn.onmessage = async (ev: MessageEvent) => {
@@ -87,6 +99,10 @@ class WS {
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
     }
+    // Notify state change when manually closed
+    if (this.stateChangeCallback) {
+      this.stateChangeCallback(false);
+    }
   }
   private reconnect() {
     if (this.closed) {
@@ -109,12 +125,17 @@ class WS {
     }, this.retry.delay * 1000);
   }
 
-  send(data: ArrayBuffer | string) {
+  async send(data: ArrayBuffer | string) {
     if (this.conn && this.conn.readyState === WebSocket.OPEN) {
       this.conn.send(data);
     } else {
       console.warn(`Websocket is not connected. Cannot send message.`);
     }
+  }
+
+  // Check if the WebSocket is connected
+  isConnected(): boolean {
+    return !!this.conn && this.conn.readyState === WebSocket.OPEN;
   }
 }
 
