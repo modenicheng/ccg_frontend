@@ -3,12 +3,14 @@ import { WS } from './wsClient';
 import { EventType } from './types/eventTypes';
 import { heartbeatHandler, startHeartbeat, audioFrameHandler } from './wsClient/handlers';
 import useWebSocketStore from './stores/webSocketStore';
+import { audio } from './audioPlayer';
 
 const WS_URL = 'ws://localhost:8000/ws/';
 const WS_RETRY = { max: 10 };
 
 function App() {
   const wsRef = useRef<WS | undefined>(undefined);
+  const audioRef = useRef(audio);
   const {
     isConnected,
     latency,
@@ -144,6 +146,22 @@ function App() {
           }}
         >
           Close WebSocket
+        </button>
+        <button
+          onClick={() => {
+            audioRef.current.initAudioContext();
+          }}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#28a52a',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '16px'
+          }}
+        >
+          Init Audio
         </button>
       </div>
     </div>
