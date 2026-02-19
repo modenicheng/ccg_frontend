@@ -1,16 +1,19 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
 interface WebSocketState {
   // 连接状态
   isConnected: boolean;
+  connState: "connecting" | "connected" | "disconnected";
   // 当前延迟（毫秒）
   latency: number | null;
+  // 平均延迟（毫秒）
+  latencyAvg: number | null;
   // 延迟历史记录
   latencyHistory: number[];
   // 最大历史记录数
   maxHistorySize: number;
   // 连接质量
-  connectionQuality: 'good' | 'fair' | 'poor' | 'unknown';
+  connectionQuality: "good" | "fair" | "poor" | "unknown";
   // 连接URL
   url: string | null;
   // 错误信息
@@ -19,9 +22,11 @@ interface WebSocketState {
   clockOffset: number | null;
   // 时间偏移历史记录
   clockOffsetHistory: number[];
+  clockOffsetAvg: number | null;
 
   // Actions
   setConnected: (connected: boolean) => void;
+  setConnState: (state: "connecting" | "connected" | "disconnected") => void;
   updateLatency: (latency: number) => void;
   updateClockOffset: (offset: number) => void;
   setUrl: (url: string) => void;
@@ -29,7 +34,7 @@ interface WebSocketState {
   clearError: () => void;
   reset: () => void;
   getAverageLatency: () => number | null;
-  getLatencyTrend: () => 'improving' | 'stable' | 'deteriorating';
+  getLatencyTrend: () => "improving" | "stable" | "deteriorating";
   getAverageClockOffset: () => number | null;
   getCalibratedNow: () => number;
   calibrateTimestamp: (timestamp: number) => number;
@@ -37,23 +42,28 @@ interface WebSocketState {
 
 const useWebSocketStore = create<WebSocketState>((set, get) => ({
   isConnected: false,
+  connState: "disconnected",
   latency: null,
+  latencyAvg: null,
   latencyHistory: [],
-  maxHistorySize: 100,
-  connectionQuality: 'unknown',
+  maxHistorySize: 16,
+  connectionQuality: "unknown",
   url: null,
   error: null,
   clockOffset: null,
   clockOffsetHistory: [],
+  clockOffsetAvg: null,
 
   setConnected: (connected) => set({ isConnected: connected }),
+  setConnState: (state) => set({ connState: state }),
 
   updateClockOffset: (offset) => {
     const { clockOffsetHistory, maxHistorySize } = get();
     const newHistory = [...clockOffsetHistory, offset].slice(-maxHistorySize);
     set({
       clockOffset: offset,
-      clockOffsetHistory: newHistory
+      clockOffsetHistory: newHistory,
+      clockOffsetAvg: newHistory.reduce((a, b) => a + b, 0) / newHistory.length,
     });
   },
 
@@ -62,59 +72,61 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
     const newHistory = [...latencyHistory, latency].slice(-maxHistorySize);
 
     // 计算连接质量
-    let quality: 'good' | 'fair' | 'poor' | 'unknown' = 'unknown';
-    if (latency < 100) quality = 'good';
-    else if (latency < 300) quality = 'fair';
-    else quality = 'poor';
+    let quality: "good" | "fair" | "poor" | "unknown" = "unknown";
+    if (latency < 40) quality = "good";
+    else if (latency < 100) quality = "fair";
+    else quality = "poor";
 
     set({
       latency,
+      latencyAvg: newHistory.reduce((a, b) => a + b, 0) / newHistory.length,
       latencyHistory: newHistory,
-      connectionQuality: quality
+      connectionQuality: quality,
     });
   },
 
   setUrl: (url) => set({ url }),
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
-  reset: () => set({
-    isConnected: false,
-    latency: null,
-    latencyHistory: [],
-    connectionQuality: 'unknown',
-    error: null,
-    clockOffset: null,
-    clockOffsetHistory: []
-  }),
+  reset: () =>
+    set({
+      isConnected: false,
+      latency: null,
+      latencyHistory: [],
+      connectionQuality: "unknown",
+      error: null,
+      clockOffset: null,
+      clockOffsetHistory: [],
+    }),
 
   getAverageLatency: () => {
     const { latencyHistory } = get();
     if (latencyHistory.length === 0) return null;
     const sum = latencyHistory.reduce((a, b) => a + b, 0);
-    return Math.round(sum / latencyHistory.length);
+    return sum / latencyHistory.length;
   },
 
   getLatencyTrend: () => {
     const { latencyHistory } = get();
-    if (latencyHistory.length < 3) return 'stable';
+    if (latencyHistory.length < 3) return "stable";
 
     const recent = latencyHistory.slice(-3);
     const avgRecent = recent.reduce((a, b) => a + b, 0) / 3;
     const previous = latencyHistory.slice(-6, -3);
 
-    if (previous.length < 3) return 'stable';
+    if (previous.length < 3) return "stable";
     const avgPrevious = previous.reduce((a, b) => a + b, 0) / 3;
 
-    if (avgRecent < avgPrevious * 0.9) return 'improving';
-    if (avgRecent > avgPrevious * 1.1) return 'deteriorating';
-    return 'stable';
+    if (avgRecent < avgPrevious * 0.9) return "improving";
+    if (avgRecent > avgPrevious * 1.1) return "deteriorating";
+    return "stable";
   },
 
   getAverageClockOffset: () => {
     const { clockOffsetHistory } = get();
     if (clockOffsetHistory.length === 0) return null;
     const sum = clockOffsetHistory.reduce((a, b) => a + b, 0);
-    return Math.round(sum / clockOffsetHistory.length);
+    return sum / clockOffsetHistory.length;
   },
 
   /**
@@ -125,7 +137,7 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
     const { clockOffsetHistory } = get();
     if (clockOffsetHistory.length === 0) return Date.now();
     const avgOffset = Math.round(
-      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length
+      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length,
     );
     return Date.now() + avgOffset;
   },
@@ -138,10 +150,10 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
     const { clockOffsetHistory } = get();
     if (clockOffsetHistory.length === 0) return timestamp;
     const avgOffset = Math.round(
-      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length
+      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length,
     );
     return timestamp + avgOffset;
-  }
+  },
 }));
 
 export default useWebSocketStore;

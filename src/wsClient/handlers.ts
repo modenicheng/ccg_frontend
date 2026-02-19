@@ -2,7 +2,7 @@ import { AudioFrame, HeartbeatFrame } from "./dataFrames";
 import { AudioEncoding, HeartbeatType } from "../types/eventTypes";
 import { WS } from ".";
 import useWebSocketStore from "../stores/webSocketStore";
-import { audio } from "../audioPlayer";
+import { streamAudio } from "../audioPlayer";
 
 // 客户端PING发送记录，存储UID和HeartbeatFrame
 const pendingPings = new Map<
@@ -194,7 +194,7 @@ export const audioFrameHandler = async (data: ArrayBuffer) => {
     );
 
     // Ensure AudioContext is initialized before sending data
-    audio.initAudioContext();
+    streamAudio.initAudioContext();
 
     // We got PCM Uint8 data from server (PCM represented as unsigned 32-bit integers, but seperated by 4 bytes),
     // so we need to convert it to Float32Array before sending to AudioWorklet for playback.
@@ -215,6 +215,6 @@ export const audioFrameHandler = async (data: ArrayBuffer) => {
 
       pcmData[i] = value / (0x7fffffff + 1); // Normalize to [-1.0, 1.0]
     }
-    audio.sendPCMToWorklet(pcmData);
+    streamAudio.sendPCMToWorklet(pcmData);
   }
 };

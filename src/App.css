@@ -4,3 +4,22 @@
   themes: light --default;
   logs: true;
 }
+
+.progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 4px;
+  background-color: var(--color-primary);
+  transition: width 0.1s ease-out, height 0.1s ease, opacity 0.1s ease;
+  z-index: 100;
+}
+
+.progress-parent:hover .progress-bar {
+  height: 6px;
+  opacity: 0.8;
+}
+
+.no-transition {
+  transition: none !important;
+}

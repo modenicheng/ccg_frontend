@@ -11,7 +11,7 @@ interface AudioDecoderConfig {
 
 const workletUrl = new URL("./pcmWorklet.ts", import.meta.url).href;
 
-class AudioManager {
+class AudioManagerForStreaming {
   private audioctx: AudioContext;
   private isPlaying: boolean = false;
   private decoder: AudioDecoder;
@@ -34,11 +34,15 @@ class AudioManager {
       .addModule(workletUrl)
       .then(() => {
         console.debug("AudioWorklet module loaded");
-        this.workletNode = new AudioWorkletNode(this.audioctx, "pcm-processor", {
-          numberOfInputs: 1,
-          numberOfOutputs: 1,
-          outputChannelCount: [audioDecoderConfig.numberOfChannels],
-        });
+        this.workletNode = new AudioWorkletNode(
+          this.audioctx,
+          "pcm-processor",
+          {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [audioDecoderConfig.numberOfChannels],
+          },
+        );
         this.workletNode.connect(this.gainNode);
         console.debug("AudioWorkletNode created and connected");
       })
@@ -63,7 +67,9 @@ class AudioManager {
 
   sendPCMToWorklet(pcmData: Float32Array) {
     if (!this.workletNode) {
-      console.warn("AudioWorkletNode not initialized yet, cannot send PCM data");
+      console.warn(
+        "AudioWorkletNode not initialized yet, cannot send PCM data",
+      );
       return;
     }
     this.workletNode.port.postMessage(pcmData);
@@ -117,10 +123,11 @@ class AudioManager {
   }
 }
 
-const audio = new AudioManager({
+const streamAudio = new AudioManagerForStreaming({
   codec: "opus",
   sampleRate: 48000,
   numberOfChannels: 2,
 });
 
-export { AudioManager, audio };
+export { AudioManagerForStreaming, streamAudio };
+export { audioPlayer } from "./player";
