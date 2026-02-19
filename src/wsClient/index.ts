@@ -83,6 +83,15 @@ class WS {
         } else {
           console.warn(`No handler registered for event type ${eventType}`);
         }
+      } else if (typeof ev.data === "string") {
+        let message
+        try {
+          message = JSON.parse(ev.data);
+        } catch (e) {
+          console.error(`Failed to parse JSON message: ${(e as Error).message}`);
+          return;
+        }
+        console.debug(`Received text message: \n`, message);
       }
     };
   }
