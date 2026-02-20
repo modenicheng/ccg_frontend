@@ -9,15 +9,22 @@ import { heartbeatHandler, startHeartbeat } from "./wsClient/handlers";
 import useWebSocketStore from "./stores/webSocketStore";
 import usePersistStore from "./stores/persistStore";
 import { audioPlayer } from "./audioPlayer";
+import { TagList } from "./components";
+import type { TagItem } from "./types/tag";
 const development = import.meta.env.DEV;
 
 // const WS_URL = 'ws://localhost:8000/ws/';
 const WS_URL = development ? "ws://localhost:8000/ws/" : "/ws/";
 const WS_RETRY = { max: 10 };
+const TAG_MAX = 0;
 
 let domProgressPercent = 0;
 let domIsDragging = false;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
+
+const makeTagId = () =>
+  globalThis.crypto?.randomUUID?.() ??
+  `tag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 function App() {
   const wsRef = useRef<WS | undefined>(undefined);
@@ -30,21 +37,41 @@ function App() {
   } = usePersistStore();
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
 
-  const [tags, setTags] = useState<
-    { id: string; name: string; selected: boolean }[]
-  >([
-    { id: "tag1", name: "Tag 1", selected: false },
-    { id: "tag2", name: "Tag 2", selected: false },
-    { id: "tag3", name: "Tag 3", selected: false },
-    { id: "tag4", name: "Tag 4", selected: false },
-    { id: "tag5", name: "Tag 5", selected: false },
+  const [tags, setTags] = useState<TagItem[]>([
+    { id: "tag1", name: "Tag 1", selected: false, canClose: false },
+    { id: "tag2", name: "Tag 2", selected: false, canClose: false },
+    { id: "tag3", name: "Tag 3", selected: false, canClose: false },
+    { id: "tag4", name: "Tag 4", selected: false, canClose: false },
+    { id: "tag5", name: "Tag 5", selected: false, canClose: false },
   ]);
+
   const toggleTag = (id: string) => {
     setTags((prevTags) =>
       prevTags.map((tag) =>
         tag.id === id ? { ...tag, selected: !tag.selected } : tag,
       ),
     );
+  };
+
+  const addTag = (name: string) => {
+    setTags((prevTags) => {
+      if (TAG_MAX > 0 && prevTags.length >= TAG_MAX) {
+        return prevTags;
+      }
+      return [
+        ...prevTags,
+        {
+          id: makeTagId(),
+          name,
+          selected: false,
+          canClose: true,
+        },
+      ];
+    });
+  };
+
+  const removeTag = (id: string) => {
+    setTags((prevTags) => prevTags.filter((tag) => tag.id !== id));
   };
 
   const audioRef = useRef<audioPlayer | null>(null);
@@ -216,7 +243,7 @@ function App() {
         </div>
       </div>
       <div className="flex gap-2 w-full">
-        <div className="card">
+        <div className="card shadow-sm">
           <div
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
               "btn-disabled": !isConnected,
@@ -240,26 +267,14 @@ function App() {
               <Icon icon="heroicons:tag" width={24} height={24} className="inline mr-1" />
               选择 Tags</h2>
             <div className="divider m-0"></div>
-            <div className="flex gap-2 flex-wrap justify-start items-center">
-              {tags.map((tag) => {
-                return (
-                  <span
-                    key={tag.id}
-                    className={clsx(
-                      "btn badge badge-lg select-none badge-primary ",
-                      {
-                        "badge-soft shadow": tag.selected,
-                        "badge-ghost": !tag.selected,
-                      },
-                    )}
-                    onClick={() => toggleTag(tag.id)}
-                  >
-                    {tag.name}
-                  </span>
-                );
-              })}
-              <input type="text" className="input input-sm w-40" />
-            </div>
+            <TagList
+              tags={tags}
+              onToggleTag={toggleTag}
+              onAddTag={addTag}
+              onRemoveTag={removeTag}
+              maxTags={TAG_MAX}
+              allowDuplicate={false}
+            />
           </div>
         </div>
         <div className="card shadow-sm w-1/5 max-w-md min-w-3xs">
