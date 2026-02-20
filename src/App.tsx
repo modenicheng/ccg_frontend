@@ -7,6 +7,7 @@ import { WS } from "./wsClient";
 import { EventType } from "./types/eventTypes";
 import { heartbeatHandler, startHeartbeat } from "./wsClient/handlers";
 import useWebSocketStore from "./stores/webSocketStore";
+import usePersistStore from "./stores/persistStore";
 import { audioPlayer } from "./audioPlayer";
 const development = import.meta.env.DEV;
 
@@ -14,17 +15,37 @@ const development = import.meta.env.DEV;
 const WS_URL = development ? "ws://localhost:8000/ws/" : "/ws/";
 const WS_RETRY = { max: 10 };
 
-setInterval(() => {
-  console.clear();
-}, 20000);
-
 let domProgressPercent = 0;
 let domIsDragging = false;
+const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
 
 function App() {
   const wsRef = useRef<WS | undefined>(undefined);
   const { isConnected, latencyAvg, setConnected, setUrl } = useWebSocketStore();
-  const [volume, setLocalVolume] = useState<number>(100);
+  const {
+    theme,
+    setTheme,
+    volume: persistVolume,
+    setVolume: setPersistVolume,
+  } = usePersistStore();
+  const [localVolume, setLocalVolume] = useState<number>(persistVolume);
+
+  const [tags, setTags] = useState<
+    { id: string; name: string; selected: boolean }[]
+  >([
+    { id: "tag1", name: "Tag 1", selected: false },
+    { id: "tag2", name: "Tag 2", selected: false },
+    { id: "tag3", name: "Tag 3", selected: false },
+    { id: "tag4", name: "Tag 4", selected: false },
+    { id: "tag5", name: "Tag 5", selected: false },
+  ]);
+  const toggleTag = (id: string) => {
+    setTags((prevTags) =>
+      prevTags.map((tag) =>
+        tag.id === id ? { ...tag, selected: !tag.selected } : tag,
+      ),
+    );
+  };
 
   const audioRef = useRef<audioPlayer | null>(null);
   const [audioState, setAudioState] = useState<string | undefined>(undefined);
@@ -63,7 +84,7 @@ function App() {
     audioRef.current.onStateChange = (state) => {
       setAudioState(state);
     };
-    setLocalVolume(audioRef.current.volume);
+    audioRef.current.volume = localVolume;
     setAudioState(audioRef.current.state);
     audioRef.current.onTimeUpdate = (ev) => {
       if (progressBarRef.current && !domIsDragging) {
@@ -80,7 +101,7 @@ function App() {
       audioRef.current = null;
       setAudioState(undefined);
     };
-  }, []);
+  }, [localVolume]);
 
   useEffect(() => {
     canvasParentRef.current?.addEventListener("mousedown", (ev) => {
@@ -113,7 +134,23 @@ function App() {
         audioRef.current.progress = domProgressPercent;
       }
     });
-    canvasParentRef.current?.addEventListener("mouseleave", () => {
+    canvasParentRef.current?.addEventListener("mouseleave", (ev) => {
+      // Only when the mouse leaves from the left or right edge, we consider it as ending dragging.
+      // This allows users to the the progress to the very start or end.
+      if (!domIsDragging) return;
+      if (
+        ev.offsetX <= 0 ||
+        ev.offsetX >= (canvasParentRef.current?.clientWidth || 0)
+      ) {
+        domProgressPercent =
+          (ev.offsetX / (canvasParentRef.current?.clientWidth || 1)) * 100;
+        if (progressBarRef.current) {
+          progressBarRef.current.style.width = `${domProgressPercent}%`;
+        }
+        if (audioRef.current) {
+          audioRef.current.progress = domProgressPercent;
+        }
+      }
       domIsDragging = false;
       progressBarRef.current?.classList.remove("no-transition");
     });
@@ -123,8 +160,13 @@ function App() {
     if (audioRef.current) {
       audioRef.current.volume = value;
       setLocalVolume(value);
+      setPersistVolume(value);
     }
   };
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   return (
     <div className="flex flex-col gap-4 p-4 max-w-400 mx-auto">
@@ -162,7 +204,7 @@ function App() {
           </div>
         </div>
         <div
-          className="btn h-full p-3 shadow-sm"
+          className="btn btn-ghost h-full p-3 shadow-sm"
           onClick={() => settingDialogRef.current?.showModal()}
         >
           <Icon
@@ -173,65 +215,167 @@ function App() {
           />
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-2">
-        <div className="card shadow-sm md:col-span-4 lg:col-span-5 sm:col-span-full">
-          <div className="card-body">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th className="w-12 text-center table-pin-cols">排名</th>
-                  <th className="table-pin-cols">玩家</th>
-                  <th className="w-16">总分</th>
-                </tr>
-              </thead>
-              <tbody>
-                {new Array(5).fill(0).map((_, i) => (
-                  <tr key={i}>
-                    <td className="text-end">{i + 1}</td>
-                    <td>玩家{i + 1}</td>
-                    <td className="text-end">{100 - i * 10}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="card shadow-sm md:col-span-3 lg:col-span-2 sm:col-span-full">
-          <div className="card-body">111</div>
-        </div>
-      </div>
-      <dialog ref={settingDialogRef} className="modal">
-        <div className="modal-box">
-          <h2 className="font-bold text-xl">设置</h2>
-          <div className="divider"></div>
-          <input
-            type="range"
-            min={0}
-            max={300}
-            value={volume}
-            className={clsx("range", {
-              "range-primary": volume <= 100,
-              "range-warning": volume > 100 && volume <= 200,
-              "range-error": volume > 200,
-            })}
-            onChange={(e) => setVolume(parseInt(e.target.value))}
-          />
-          <span
-            className={clsx("text-sm ml-2", {
-              "text-warning": volume > 100 && volume <= 200,
-              "text-error": volume > 200,
+      <div className="flex gap-2 w-full">
+        <div className="card">
+          <div
+            className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
+              "btn-disabled": !isConnected,
             })}
           >
-            {volume} %
-          </span>
-          <div className="text-xs text-gray-400 mt-1">
-            {volume > 100 && volume <= 200
-              ? "我说你耳朵聋，你听不见吗？"
-              : volume > 200
-                ? "这么小声还想开军舰？"
-                : volume === 0
-                  ? "一个猜歌比赛你不开声音，你是不是*开了*？"
-                  : "这样的声音大小合适吗？听得见吗？"}
+            <h2 className="text-3xl">抢答！</h2>
+            <div className="flex">
+              <div className="kbd kbd-sm font-mono text-base-content">
+                Space ␣
+              </div>
+              <div className="divider divider-horizontal m-0"></div>
+              <div className="kbd kbd-sm font-mono text-base-content">
+                Enter ⏎
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="card shadow-sm flex-1 min-h-56">
+          <div className="card-body">
+            <h2 className="text-lg font-semibold flex items-center">
+              <Icon icon="heroicons:tag" width={24} height={24} className="inline mr-1" />
+              选择 Tags</h2>
+            <div className="divider m-0"></div>
+            <div className="flex gap-2 flex-wrap justify-start items-center">
+              {tags.map((tag) => {
+                return (
+                  <span
+                    key={tag.id}
+                    className={clsx(
+                      "btn badge badge-lg select-none badge-primary ",
+                      {
+                        "badge-soft shadow": tag.selected,
+                        "badge-ghost": !tag.selected,
+                      },
+                    )}
+                    onClick={() => toggleTag(tag.id)}
+                  >
+                    {tag.name}
+                  </span>
+                );
+              })}
+              <input type="text" className="input input-sm w-40" />
+            </div>
+          </div>
+        </div>
+        <div className="card shadow-sm w-1/5 max-w-md min-w-3xs">
+          <div className="card-body p-0">
+            <ul className="list">
+              <li className="list-row">
+                <h2 className="font-semibold flex items-center text-lg">
+                  <Icon
+                    icon="heroicons:users"
+                    width={24}
+                    height={24}
+                    className="inline mr-1"
+                  />
+                  在线玩家
+                </h2>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* SCORE TABLE */}
+      <div className="card shadow-sm max-h-120">
+        <div className="card-body overflow-auto p-0">
+          <table className="table table-pin-cols table-pin-rows">
+            <thead>
+              <tr>
+                <th className="w-4 text-end">排名</th>
+                <th className="">玩家</th>
+                <td className="w-6 text-end">总分</td>
+                {new Array(125).fill(0).map((_, i) => (
+                  <td key={i} className="">
+                    第{i + 1}轮
+                  </td>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {new Array(20).fill(0).map((_, i) => (
+                <tr key={i} className="">
+                  <th className="text-end">{i + 1}</th>
+                  <th className="text-nowrap">玩家{i + 1}</th>
+                  <td className="text-end">{100 - i * 10}</td>
+                  {new Array(125).fill(0).map((_, i) => (
+                    <td key={i} className="w-16">
+                      1
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* SETTING DIALOG */}
+      <dialog ref={settingDialogRef} className="modal">
+        <div className="modal-box w-full max-w-200">
+          <h2 className="font-bold text-2xl">设置</h2>
+          <div className="divider mt-0.5 mb-0.5"></div>
+          <div className="flex flex-col gap-1.5">
+            <h3 className="font-semibold text-xl">主题</h3>
+            <div className="flex">
+              <div className="join join-horizontal">
+                {themes.map((themeName) => (
+                  <input
+                    key={themeName}
+                    type="radio"
+                    name="theme-buttons"
+                    className="btn theme-controller join-item"
+                    aria-label={themeName[0].toUpperCase() + themeName.slice(1)}
+                    value={themeName}
+                    checked={theme === themeName}
+                    onChange={() => setTheme(themeName)}
+                  />
+                ))}
+              </div>
+            </div>
+            {/* <Themes></Themes> */}
+            <div className="text-xs text-gray-400">
+              你可以挑一个自己喜欢的主题~ （浅色调可读性略好）
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5 mt-4">
+            <h3 className="font-semibold text-xl">音量</h3>
+            <div className="flex">
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={localVolume}
+                className={clsx("range flex-1", {
+                  "range-primary": localVolume <= 100,
+                  "range-warning": localVolume > 100 && localVolume <= 150,
+                  "range-error": localVolume > 150,
+                })}
+                onChange={(e) => setVolume(parseInt(e.target.value))}
+              />
+              <span
+                className={clsx("text-sm ml-2", {
+                  "text-warning": localVolume > 100 && localVolume <= 150,
+                  "text-error": localVolume > 150,
+                })}
+              >
+                {localVolume} %
+              </span>
+            </div>
+            <div className="text-xs text-gray-400">
+              {localVolume > 100 && localVolume <= 150
+                ? "我说你耳朵聋，你听不见吗？"
+                : localVolume > 150
+                  ? "这么小声还想开军舰？"
+                  : localVolume === 0
+                    ? "一个猜歌比赛你不开声音，你是不是*开了*？"
+                    : "这样的声音大小合适吗？听得见吗？"}
+            </div>
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">

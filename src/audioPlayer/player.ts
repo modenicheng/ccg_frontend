@@ -171,7 +171,7 @@ class audioPlayer {
       // 将 0-255 映射到 0-1 并乘以高度
       const barHeight = this.smmothedData[i] * height;
 
-      ctx.fillStyle = getCssVariable("--color-primary-content");
+      ctx.fillStyle = `color-mix(in lch, ${getCssVariable("--color-primary")} 20%, ${getCssVariable("--color-base-100")})`;
       // console.log(`Drawing bar ${i}: height=${barHeight.toFixed(2)}, color=${ctx.fillStyle}`);
       // ctx.fillStyle = `hsl(${(i / bufferLength) * 360}, 100%, 50%)`; // 彩虹色
       // 绘制柱子（x 为当前起始位置）
@@ -303,7 +303,7 @@ class audioPlayer {
     return Math.log2(this.gainNode.gain.value + 1) * 100;
   }
   set volume(value: number) {
-    this.gainNode.gain.value = Math.pow(2, (value) / 100) - 1;
+    this.gainNode.gain.value = Math.pow(2, value / 100) - 1;
   }
 
   /**

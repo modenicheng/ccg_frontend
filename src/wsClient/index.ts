@@ -13,6 +13,7 @@ class WS {
   private readonly url: string;
   private retry: retryConfig;
   private retryCount: number = 0;
+  private readonly reconnectDelay: number; // Initial delay for reconnection in seconds
   private reconnectTimeout?: number;
   private closed: boolean = false;
   private handlers: Map<EventType, Handler<ArrayBuffer | string>> = new Map();
@@ -26,6 +27,8 @@ class WS {
       backoff: true,
       ...retryConfig,
     };
+
+    this.reconnectDelay = this.retry.delay;
 
     this.connect();
   }
@@ -53,6 +56,7 @@ class WS {
       console.log(`Websocket connected.`);
       console.debug(ev);
       this.retryCount = 0;
+      this.retry.delay = this.reconnectDelay; // Reset delay after successful connection
       if (this.stateChangeCallback) {
         this.stateChangeCallback(true);
       }
