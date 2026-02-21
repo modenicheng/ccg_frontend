@@ -1,44 +1,5 @@
 import { create } from "zustand";
-
-interface WebSocketState {
-  // 连接状态
-  isConnected: boolean;
-  connState: "connecting" | "connected" | "disconnected";
-  // 当前延迟（毫秒）
-  latency: number | null;
-  // 平均延迟（毫秒）
-  latencyAvg: number | null;
-  // 延迟历史记录
-  latencyHistory: number[];
-  // 最大历史记录数
-  maxHistorySize: number;
-  // 连接质量
-  connectionQuality: "good" | "fair" | "poor" | "unknown";
-  // 连接URL
-  url: string | null;
-  // 错误信息
-  error: string | null;
-  // 客户端时间偏移（毫秒）
-  clockOffset: number | null;
-  // 时间偏移历史记录
-  clockOffsetHistory: number[];
-  clockOffsetAvg: number | null;
-
-  // Actions
-  setConnected: (connected: boolean) => void;
-  setConnState: (state: "connecting" | "connected" | "disconnected") => void;
-  updateLatency: (latency: number) => void;
-  updateClockOffset: (offset: number) => void;
-  setUrl: (url: string) => void;
-  setError: (error: string | null) => void;
-  clearError: () => void;
-  reset: () => void;
-  getAverageLatency: () => number | null;
-  getLatencyTrend: () => "improving" | "stable" | "deteriorating";
-  getAverageClockOffset: () => number | null;
-  getCalibratedNow: () => number;
-  calibrateTimestamp: (timestamp: number) => number;
-}
+import type { WebSocketState } from "../types/store";
 
 const useWebSocketStore = create<WebSocketState>((set, get) => ({
   isConnected: false,

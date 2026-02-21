@@ -12,6 +12,7 @@ class audioPlayer {
   private fftSize: number = 1024; // 修正命名
   private smmothedData?: Float32Array;
   private smmothingFactor: number = 0.6; // 平滑因子，范围 [0, 1]，值越小越平滑
+  private preloadTable: Record<string, HTMLAudioElement> = {}; // URL -> HTMLAudioElement
 
   private stateChangeCallback?: (state: string) => void;
   private timeUpdateCallback = (ev: Event) => {
@@ -43,6 +44,7 @@ class audioPlayer {
   }
 
   initCanvas(canvas: HTMLCanvasElement, parent: HTMLElement) {
+    if (this.canvas === canvas) return; // 已初始化同一 canvas，无需重复设置
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
     if (!ctx) {
@@ -191,21 +193,52 @@ class audioPlayer {
     }
   }
 
-  /**
-   * 播放网络音频流（通过 <audio> 元素）
-   */
-  async playUrlAsStream(url: string): Promise<void> {
-    // 1. 完全停止并丢弃旧的音频元素和源节点
-    this.cleanupCurrentSource(); // 需要实现此方法
-
-    // 2. 创建全新的 audio 元素
+  async preload(url: string): Promise<void> {
+    if (this.preloadTable[url]) {
+      return;
+    }
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
     audio.src = url;
     audio.loop = false;
-    audio.load(); // 可选，设置 src 后自动开始加载
-    audio.ontimeupdate = this.timeUpdateCallback;
+    audio.load();
+    this.preloadTable[url] = audio;
+    // 只要开始预加载就直接用这个开始加载的，无论是不是可以用
+    // 避免重复创建元素和请求
+    audio.oncanplaythrough = () => {
+      console.log(`Preloaded audio for URL: ${url}`);
+    };
+  }
 
+  /**
+   * 播放网络音频流（通过 <audio> 元素）
+   */
+  async playUrlAsStream(
+    url: string,
+    playByDefault: boolean = false,
+  ): Promise<void> {
+    // 1. 完全停止并丢弃旧的音频元素和源节点
+    this.cleanupCurrentSource();
+
+    let audio;
+
+    if (this.preloadTable[url]) {
+      console.log(`Using preloaded audio for URL: ${url}`);
+      audio = this.preloadTable[url];
+    } else {
+      console.log(
+        `No preloaded audio found for URL: ${url}, creating new audio element.`,
+      );
+
+      // 2. 创建全新的 audio 元素
+      audio = new Audio();
+      audio.crossOrigin = "anonymous";
+      audio.src = url;
+      audio.loop = false;
+      audio.load(); // 可选，设置 src 后自动开始加载
+    }
+
+    audio.ontimeupdate = this.timeUpdateCallback;
     // 3. 创建新的源节点
     try {
       this.sourceNode = this.audioCtx.createMediaElementSource(audio);
@@ -223,16 +256,21 @@ class audioPlayer {
     // 6. 确保 AudioContext 已启动
     await this.audioCtx.resume();
 
-    // 7. 播放
-    try {
-      await audio.play();
-      this.audioState = "running";
+    if (playByDefault) {
+      // 7. 播放
+      try {
+        await audio.play();
+        this.audioState = "running";
+        this.stateChangeCallback?.(this.audioState);
+      } catch (err) {
+        console.error("播放失败", err);
+        this.audioState = "closed";
+        this.stateChangeCallback?.(this.audioState);
+        throw err;
+      }
+    } else {
+      this.audioState = "suspended";
       this.stateChangeCallback?.(this.audioState);
-    } catch (err) {
-      console.error("播放失败", err);
-      this.audioState = "closed";
-      this.stateChangeCallback?.(this.audioState);
-      throw err;
     }
 
     // 8. 监听结束事件

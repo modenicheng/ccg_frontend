@@ -67,11 +67,11 @@ function TagList({
               {/** tag.canClose 默认为 true；showRemoveButton 是全局开关 */}
               <div
                 className={clsx(
-                  "btn btn-sm btn-ghost cursor-pointer select-none p-0",
+                  "btn btn-sm btn-soft cursor-pointer select-none p-0",
                   tagClassName,
                   {
-                    "btn-primary shadow": tag.selected,
-                    "": !tag.selected,
+                    "bg-primary-content text-primary shadow": tag.selected,
+                    "bg-base-200": !tag.selected,
                   },
                   tag.selected ? selectedTagClassName : unselectedTagClassName,
                 )}

@@ -1,35 +1,8 @@
 import { create } from "zustand";
 import { WS } from "../wsClient";
-import { AudioManager } from "../audioPlayer";
+import type { GameState } from "../types/store";
 
-interface audioState {
-  volume: number;
-  isPlaying: boolean;
-}
-interface audioMeta {
-  albumId: number;
-  albumName: string;
-  artistId: number;
-  artistName: string;
-  duration: number;
-  title: string;
-  tags?: string[];
-  coverUrl?: string;
-  audioUrl?: string;
-}
-
-interface gameState {
-  audio: audioState;
-  audioMeta?: audioMeta;
-  nextAudioMeta?: audioMeta; // For preloading the audio
-  ws?: WS;
-  audioManager?: AudioManager;
-
-  setWS: (ws: WS) => void;
-  setAudioManager: (audioManager: AudioManager) => void;
-}
-
-export const useGameStore = create<gameState>((set, get) => ({
+export const useGameStore = create<GameState>((set) => ({
   audio: {
     volume: 1.0,
     isPlaying: false,
@@ -48,12 +21,16 @@ export const useGameStore = create<gameState>((set, get) => ({
   nextAudioMeta: undefined,
   ws: undefined,
   audioManager: undefined,
+  user: {
+    id: 0,
+    username: "",
+    suffix: "",
+    token: "",
+    isOwner: false,
+  },
 
   // Action to set the WebSocket instance
   setWS: (ws: WS) => {
     set({ ws });
-  },
-  setAudioManager: (audioManager: AudioManager) => {
-    set({ audioManager });
   },
 }));

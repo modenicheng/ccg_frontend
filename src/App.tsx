@@ -123,6 +123,11 @@ function App() {
         progressBarRef.current.style.width = `${progressPercent}%`;
       }
     };
+    audioRef.current.preload(`https://cdn.modenc.top/files/Orig.mp3`);
+    audioRef.current.playUrlAsStream(
+      `https://cdn.modenc.top/files/Orig.mp3`,
+      false,
+    );
     return () => {
       audioRef.current?.cleanup();
       audioRef.current = null;
@@ -264,8 +269,14 @@ function App() {
         <div className="card shadow-sm flex-1 min-h-56">
           <div className="card-body">
             <h2 className="text-lg font-semibold flex items-center">
-              <Icon icon="heroicons:tag" width={24} height={24} className="inline mr-1" />
-              选择 Tags</h2>
+              <Icon
+                icon="heroicons:tag"
+                width={24}
+                height={24}
+                className="inline mr-1"
+              />
+              选择 Tags
+            </h2>
             <div className="divider m-0"></div>
             <TagList
               tags={tags}
@@ -411,19 +422,8 @@ function App() {
                 canvasRef.current,
                 canvasParentRef.current,
               );
-              audioRef.current.playUrlAsStream(
-                `https://cdn.modenc.top/files/Orig.mp3`,
-              );
+              audioRef.current?.togglePlay();
             }
-          }}
-        >
-          Play Test Audio
-        </button>
-        <div>{audioState}</div>
-        <button
-          className="btn"
-          onClick={() => {
-            audioRef.current?.togglePlay();
           }}
         >
           {audioState === "running" ? "Pause Audio" : "Resume Audio"}

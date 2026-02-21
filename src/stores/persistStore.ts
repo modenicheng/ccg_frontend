@@ -1,12 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-
-interface PersistState {
-    theme: string;
-    volume: number;
-    setTheme: (theme: string) => void;
-    setVolume: (volume: number) => void;
-}
+import type { PersistState } from "../types/store";
 
 const usePersistStore = create<PersistState>()(
     persist(
