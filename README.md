@@ -81,22 +81,38 @@ docs: 完善 README 启动说明
 
 ```text
 src/
-├─ App.tsx                # 主界面与业务交互
+├─ App.tsx                # 路由入口（/ 与 /room/:roomid）
 ├─ App.css                # 全局样式（含 Tailwind / daisyUI 插件与局部样式）
+├─ api/                   # REST API 封装（/api/room/*）
 ├─ audioPlayer/           # 音频播放与 worklet 逻辑
 ├─ components/            # 通用组件
+├─ pages/                 # 页面组件（HomePage / RoomPage）
 ├─ stores/                # Zustand 状态管理
 ├─ types/                 # 类型定义
 ├─ utils/                 # 工具函数
 └─ wsClient/              # WebSocket 客户端与消息处理
 ```
 
+## 路由说明
+
+- `/`：创建/加入房间页面
+- `/room/:roomid`：房间页面（原先 `App.tsx` 的主要内容）
+
+## REST 接口说明
+
+- `POST /api/room/`：创建房间
+- `GET /api/room/:roomid`：获取房间信息
+- `PATCH /api/room/:roomid`：更新房间设置（如歌单、标题、描述）
+
 ## WebSocket 连接说明
 
-当前前端连接地址逻辑如下（见 `src/App.tsx`）：
+当前前端连接地址逻辑如下（见 `src/pages/RoomPage.tsx`）：
 
-- 开发环境：`ws://localhost:8000/ws/`
-- 生产环境：`/ws/`（后端直接托管前端编译产物，同源）
+- 连接路径：`/ws/:roomid`
+- 开发环境：默认连接 `http://localhost:8000` 对应的 WS（可通过 `VITE_BACKEND_ORIGIN` 覆盖）
+- 生产环境：同源连接
+
+开发模式下，Vite 已配置 `/api` 与 `/ws` 代理到后端 `localhost:8000`。
 
 如需联调，请确保后端 WebSocket 服务可用。
 
