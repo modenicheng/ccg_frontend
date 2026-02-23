@@ -50,6 +50,7 @@ export interface WebSocketState {
   maxHistorySize: number;
   connectionQuality: "good" | "fair" | "poor" | "unknown";
   url: string | null;
+  roomId: string | null;
   error: string | null;
   clockOffset: number | null;
   clockOffsetHistory: number[];
@@ -60,6 +61,7 @@ export interface WebSocketState {
   updateLatency: (latency: number) => void;
   updateClockOffset: (offset: number) => void;
   setUrl: (url: string) => void;
+  setRoomId: (roomId: string | null) => void;
   setError: (error: string | null) => void;
   clearError: () => void;
   reset: () => void;

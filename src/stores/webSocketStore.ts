@@ -10,6 +10,7 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
   maxHistorySize: 16,
   connectionQuality: "unknown",
   url: null,
+  roomId: null,
   error: null,
   clockOffset: null,
   clockOffsetHistory: [],
@@ -47,6 +48,7 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
   },
 
   setUrl: (url) => set({ url }),
+  setRoomId: (roomId) => set({ roomId }),
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
   reset: () =>
@@ -55,6 +57,8 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
       latency: null,
       latencyHistory: [],
       connectionQuality: "unknown",
+      url: null,
+      roomId: null,
       error: null,
       clockOffset: null,
       clockOffsetHistory: [],
