@@ -289,7 +289,7 @@ function App() {
           </div>
         </div>
         <div className="card shadow-sm w-1/5 max-w-md min-w-3xs">
-          <div className="card-body p-0">
+          <div className="card-body p-2">
             <ul className="list">
               <li className="list-row">
                 <h2 className="font-semibold flex items-center text-lg">
@@ -409,6 +409,10 @@ function App() {
         </form>
       </dialog>
       {/* TEST BELOW */}
+      <figure>
+
+        <img src="https://music-file.y.qq.com/songlist/user/NKoqNeC5NKSA/68a3ff5b/HjXL0fy6EiixGOe8lSMEtc_190f80.jpg" />
+      </figure>
       <div>
         <button
           className="btn"
