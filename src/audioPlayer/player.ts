@@ -287,6 +287,20 @@ class audioPlayer {
     }
   }
 
+  set progressMs(value: number) {
+    if (this.audioElement) {
+      this.audioElement.currentTime = Math.max(0, value) / 1000;
+    }
+  }
+
+  get duration(): number {
+    return this.audioElement?.duration ?? 0;
+  }
+
+  get currentTime(): number {
+    return this.audioElement?.currentTime ?? 0;
+  }
+
   /**
    * 停止当前音频源并清理相关资源
    */

@@ -5,6 +5,31 @@ export const EventType = {
   META_DATA: 2,
   HEARTBEAT: 3,
   TIME_SYNC: 4,
+
+  ROOM_CREATE: 10,
+  ROOM_JOIN: 11,
+  ROOM_STATE: 12,
+  GAME_OVER: 13,
+
+  LOAD: 20,
+  PLAY: 21,
+  PAUSE: 22,
+  SEEK: 23,
+
+  PLAYER_READY: 30,
+  GAME_START: 31, // host-only
+  COUNTDOWN: 32,
+  ATTEMPT_ANSWER: 33, // player action in playing phase
+  YOUR_TURN: 34,
+  SUBMIT_ANSWER: 35, // current answerer only
+  ANSWER_BROADCAST: 36,
+  ANSWER_QUEUE: 37,
+  ROUND_END: 38,
+
+  JUDGING: 40,
+  JUDGE_SUBMIT: 41, // host-only in judging phase
+  SCORE_UPDATE: 42,
+
   MESSAGE: 255, // for error handling
 } as const;
 

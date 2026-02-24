@@ -31,9 +31,13 @@ async function parseJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function createRoom(): Promise<CreateRoomResponse> {
+export async function createRoom(username: string): Promise<CreateRoomResponse> {
   const response = await fetch("/api/room/", {
     method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ username }),
   });
   return parseJson<CreateRoomResponse>(response);
 }

@@ -16,7 +16,7 @@ class WS {
   private readonly reconnectDelay: number; // Initial delay for reconnection in seconds
   private reconnectTimeout?: number;
   private closed: boolean = false;
-  private handlers: Map<EventType, Handler<ArrayBuffer | string>> = new Map();
+  private handlers: Map<EventType, Handler<unknown>> = new Map();
   private stateChangeCallback?: (connected: boolean) => void;
 
   constructor(url: string, retryConfig?: Partial<retryConfig>) {
@@ -34,11 +34,11 @@ class WS {
   }
 
   // Register a handler for a specific event type.
-  on<T extends ArrayBuffer | string>(
+  on<T>(
     eventType: EventType,
     handler: Handler<T>,
   ) {
-    this.handlers.set(eventType, handler as Handler<ArrayBuffer | string>);
+    this.handlers.set(eventType, handler as Handler<unknown>);
   }
 
   off(eventType: EventType) {
@@ -61,13 +61,14 @@ class WS {
         this.stateChangeCallback(true);
       }
     };
-    this.conn.onclose = (ev: Event) => {
+    this.conn.onclose = (ev: CloseEvent) => {
       console.log(`Websocket disconnected.`);
       console.debug(ev);
       this.conn = undefined;
       if (this.stateChangeCallback) {
         this.stateChangeCallback(false);
       }
+      if (ev.code === 1008) return;
       this.reconnect();
     };
     this.conn.onmessage = async (ev: MessageEvent) => {
@@ -82,20 +83,35 @@ class WS {
           if (typeof handler === "function") {
             await handler(arrayBuffer, this);
           } else {
-            console.warn(`Handler for event type ${eventType} is not a function`);
+            console.warn(
+              `Handler for event type ${eventType} is not a function`,
+            );
           }
         } else {
           console.warn(`No handler registered for event type ${eventType}`);
         }
       } else if (typeof ev.data === "string") {
-        let message
+        let message;
         try {
           message = JSON.parse(ev.data);
         } catch (e) {
-          console.error(`Failed to parse JSON message: ${(e as Error).message}`);
+          console.error(
+            `Failed to parse JSON message: ${(e as Error).message}`,
+          );
           return;
         }
         console.debug(`Received text message: \n`, message);
+        const eventType = message?.event as EventType | undefined;
+        if (typeof eventType !== "number") {
+          console.warn(`No valid event in JSON message`, message);
+          return;
+        }
+        const handler = this.handlers.get(eventType);
+        if (handler) {
+          await handler(message, this);
+        } else {
+          console.warn(`No handler registered for JSON event type ${eventType}`);
+        }
       }
     };
   }
@@ -144,6 +160,10 @@ class WS {
     } else {
       console.warn(`Websocket is not connected. Cannot send message.`);
     }
+  }
+
+  async sendJson(payload: object) {
+    await this.send(JSON.stringify(payload));
   }
 
   // Check if the WebSocket is connected

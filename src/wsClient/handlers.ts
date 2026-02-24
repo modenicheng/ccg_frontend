@@ -2,7 +2,9 @@ import { AudioFrame, HeartbeatFrame } from "./dataFrames";
 import { AudioEncoding, HeartbeatType } from "../types/eventTypes";
 import { WS } from ".";
 import useWebSocketStore from "../stores/webSocketStore";
+import useRoomStateStore from "../stores/roomStateStore";
 import { streamAudio } from "../audioPlayer";
+import type { RoomStateSnapshot, ScoreDeltaItem } from "../types/store";
 
 // 客户端PING发送记录，存储UID和HeartbeatFrame
 const pendingPings = new Map<
@@ -217,4 +219,95 @@ export const audioFrameHandler = async (data: ArrayBuffer) => {
     }
     streamAudio.sendPCMToWorklet(pcmData);
   }
+};
+
+interface WsEnvelope<T = Record<string, unknown>> {
+  v: number;
+  event: number;
+  ts: number;
+  request_id?: string;
+  seq?: number;
+  trace_id?: string;
+  data: T;
+}
+
+interface AnswerQueuePayload {
+  room_id: string;
+  queue_player_ids: string[];
+}
+
+interface PlaybackPayload {
+  room_id?: string;
+  song_id?: number | string | null;
+  progress_ms: number;
+  keep_playing?: boolean;
+}
+
+interface ScorePayload {
+  room_id: string;
+  round_index: number;
+  scores: ScoreDeltaItem[];
+}
+
+interface YourTurnPayload {
+  room_id: string;
+  answerer_player_id: string;
+}
+
+interface JudgingPayload {
+  room_id: string;
+}
+
+interface RoundEndPayload {
+  room_id: string;
+  next_round_index?: number;
+}
+
+export const roomStateHandler = async (payload: WsEnvelope<RoomStateSnapshot>) => {
+  if (!payload?.data) return;
+  const store = useRoomStateStore.getState();
+  store.setSnapshot(payload.data);
+
+  if (payload.data.room_id) {
+    store.syncIdentityFromSession(payload.data.room_id);
+  }
+};
+
+export const answerQueueHandler = async (payload: WsEnvelope<AnswerQueuePayload>) => {
+  if (!payload?.data?.queue_player_ids) return;
+  useRoomStateStore.getState().setQueue(payload.data.queue_player_ids);
+};
+
+export const playHandler = async (payload: WsEnvelope<PlaybackPayload>) => {
+  const progress = Number(payload?.data?.progress_ms ?? 0);
+  useRoomStateStore.getState().setPlayback("playing", progress);
+};
+
+export const pauseHandler = async (payload: WsEnvelope<PlaybackPayload>) => {
+  const progress = Number(payload?.data?.progress_ms ?? 0);
+  useRoomStateStore.getState().setPlayback("paused", progress);
+};
+
+export const seekHandler = async (payload: WsEnvelope<PlaybackPayload>) => {
+  const progress = Number(payload?.data?.progress_ms ?? 0);
+  const playState = payload?.data?.keep_playing ? "playing" : "paused";
+  useRoomStateStore.getState().setPlayback(playState, progress);
+};
+
+export const scoreUpdateHandler = async (payload: WsEnvelope<ScorePayload>) => {
+  if (!payload?.data?.scores) return;
+  useRoomStateStore.getState().setScores(payload.data.scores);
+};
+
+export const yourTurnHandler = async (payload: WsEnvelope<YourTurnPayload>) => {
+  const answerer = payload?.data?.answerer_player_id;
+  useRoomStateStore.getState().applyYourTurn(answerer ?? null);
+};
+
+export const judgingHandler = async (_payload: WsEnvelope<JudgingPayload>) => {
+  useRoomStateStore.getState().applyJudging();
+};
+
+export const roundEndHandler = async (payload: WsEnvelope<RoundEndPayload>) => {
+  useRoomStateStore.getState().applyRoundEnd(payload?.data?.next_round_index);
 };
