@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { WS } from "../wsClient";
 import type { GameState, RoomState } from "../types/store";
+import { getRoomInfo } from "../api/room";
 
 export const gameStore = create<GameState>((set, get) => ({
   audio: {
@@ -52,11 +53,16 @@ export const gameStore = create<GameState>((set, get) => ({
     if (!roomState) return;
 
     try {
-      const response = await fetch(`http://localhost:8000/api/room/${roomState.roomId}`);
-      if (response.ok) {
-        const data = await response.json();
-        set({ roomState: data });
-      }
+      const data = await getRoomInfo(roomState.roomId);
+      const nextRoomState: RoomState = {
+        ...roomState,
+        ...data,
+        status: data.status as RoomState["status"],
+        startPositionPercent:
+          data.startPositionPercent ?? roomState.startPositionPercent,
+      };
+
+      set({ roomState: nextRoomState });
     } catch (error) {
       console.error('Failed to refresh room state:', error);
     }

@@ -49,7 +49,7 @@ export interface GameState {
   setWS: (ws: import("../wsClient").WS) => void;
   setRoomState: (roomState: RoomState) => void;
   setIsHost: (isHost: boolean) => void;
-  refreshRoomState: () => void;
+  refreshRoomState: () => Promise<void>;
 }
 
 export interface PersistState {

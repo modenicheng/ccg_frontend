@@ -1,3 +1,5 @@
+import { http } from "./http.ts";
+
 export interface CreateRoomResponse {
   roomId: string;
   playerId: string;
@@ -12,49 +14,37 @@ export interface RoomInfoResponse {
   description?: string | null;
   players: string[];
   songQueue: string[];
-  tagGroups: Record<string, unknown>;
+  tagGroups: Record<string, string[]>;
   playProgress: number;
+  startPositionPercent?: number;
 }
 
 export interface PatchRoomRequest {
-  songQueue?: string[];
+  song_queue?: string[];
   title?: string;
   description?: string;
-  tagGroups?: Record<string, unknown>;
-}
-
-async function parseJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `HTTP ${response.status}`);
-  }
-  return (await response.json()) as T;
+  tag_groups?: Record<string, string[]>;
 }
 
 export async function createRoom(): Promise<CreateRoomResponse> {
-  const response = await fetch("/api/room/", {
-    method: "POST",
-  });
-  return parseJson<CreateRoomResponse>(response);
+  const { data } = await http.post<CreateRoomResponse>("/api/room/");
+  return data;
 }
 
 export async function getRoomInfo(roomId: string): Promise<RoomInfoResponse> {
-  const response = await fetch(`/api/room/${encodeURIComponent(roomId)}`, {
-    method: "GET",
-  });
-  return parseJson<RoomInfoResponse>(response);
+  const { data } = await http.get<RoomInfoResponse>(
+    `/api/room/${encodeURIComponent(roomId)}`,
+  );
+  return data;
 }
 
 export async function patchRoomInfo(
   roomId: string,
   payload: PatchRoomRequest,
 ): Promise<RoomInfoResponse> {
-  const response = await fetch(`/api/room/${encodeURIComponent(roomId)}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-  return parseJson<RoomInfoResponse>(response);
+  const { data } = await http.patch<RoomInfoResponse>(
+    `/api/room/${encodeURIComponent(roomId)}`,
+    payload,
+  );
+  return data;
 }

@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { gameStore, useGameStore } from '../stores/gameStore';
-import { webSocketStore } from '../stores/webSocketStore';
+import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { gameStore, useGameStore } from "../stores/gameStore";
+import useWebSocketStore from "../stores/webSocketStore";
+import { patchRoomInfo } from "../api/room";
 
 const RoomManagePage: React.FC = () => {
   const { roomid } = useParams<{ roomid: string }>();
   const navigate = useNavigate();
   const { roomState, isHost } = useGameStore();
-  const { wsClient } = webSocketStore();
-  
+  const { wsClient } = useWebSocketStore();
+
   const [startPosition, setStartPosition] = useState<number>(0);
-  const [title, setTitle] = useState<string>('');
-  const [description, setDescription] = useState<string>('');
+  const [title, setTitle] = useState<string>("");
+  const [description, setDescription] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (!roomid) {
-      navigate('/');
+      navigate("/");
       return;
     }
 
@@ -30,13 +31,15 @@ const RoomManagePage: React.FC = () => {
     // 从房间状态初始化表单
     if (roomState) {
       setStartPosition(roomState.startPositionPercent || 0);
-      setTitle(roomState.title || '');
-      setDescription(roomState.description || '');
+      setTitle(roomState.title || "");
+      setDescription(roomState.description || "");
       setIsLoading(false);
     }
   }, [roomid, navigate, isHost, roomState]);
 
-  const handleStartPositionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStartPositionChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const value = parseInt(e.target.value);
     setStartPosition(value);
   };
@@ -49,27 +52,20 @@ const RoomManagePage: React.FC = () => {
       await wsClient.sendJson({
         event: 14, // START_POS_UPDATE
         data: {
-          start_position_percent: startPosition
-        }
+          start_position_percent: startPosition,
+        },
       });
 
       // 发送房间设置更新
-      await fetch(`http://localhost:8000/api/room/${roomid}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          title,
-          description
-        })
+      await patchRoomInfo(roomid, {
+        title,
+        description,
       });
 
       // 刷新房间状态
       gameStore.getState().refreshRoomState();
-      
     } catch (error) {
-      console.error('保存设置失败:', error);
+      console.error("保存设置失败:", error);
     }
   };
 
@@ -80,13 +76,13 @@ const RoomManagePage: React.FC = () => {
       // 发送游戏开始事件
       await wsClient.sendJson({
         event: 31, // GAME_START
-        data: {}
+        data: {},
       });
-      
+
       // 重定向到游戏页面
       navigate(`/room/${roomid}`);
     } catch (error) {
-      console.error('开始游戏失败:', error);
+      console.error("开始游戏失败:", error);
     }
   };
 
@@ -107,8 +103,8 @@ const RoomManagePage: React.FC = () => {
       <nav className="bg-white shadow-md">
         <div className="container mx-auto px-4 py-3 flex justify-between items-center">
           <h1 className="text-xl font-bold text-primary">猜猜歌 - 房间管理</h1>
-          <button 
-            className="btn btn-ghost" 
+          <button
+            className="btn btn-ghost"
             onClick={() => navigate(`/room/${roomid}`)}
           >
             返回房间
@@ -122,7 +118,9 @@ const RoomManagePage: React.FC = () => {
           {/* 房间信息卡片 */}
           <div className="card bg-white shadow-lg rounded-lg overflow-hidden">
             <div className="card-body p-6">
-              <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">房间设置</h2>
+              <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">
+                房间设置
+              </h2>
 
               {/* 房间基本信息 */}
               <div className="space-y-6">
@@ -160,7 +158,9 @@ const RoomManagePage: React.FC = () => {
                     <label className="label">
                       <span className="label-text">播放起始位置</span>
                     </label>
-                    <span className="text-sm font-medium">{startPosition}%</span>
+                    <span className="text-sm font-medium">
+                      {startPosition}%
+                    </span>
                   </div>
                   <input
                     type="range"
