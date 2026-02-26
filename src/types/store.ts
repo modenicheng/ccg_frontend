@@ -88,7 +88,7 @@ export interface WebSocketState {
   setError: (error: string | null) => void;
   clearError: () => void;
   reset: () => void;
-  setWsClient: (wsClient: import("../wsClient").WS) => void;
+  setWsClient: (wsClient: import("../wsClient").WS | undefined) => void;
   getAverageLatency: () => number | null;
   getLatencyTrend: () => "improving" | "stable" | "deteriorating";
   getAverageClockOffset: () => number | null;

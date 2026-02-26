@@ -293,6 +293,26 @@ class audioPlayer {
     }
   }
 
+  set progressMs(value: number) {
+    if (this.audioElement) {
+      this.audioElement.currentTime = Math.max(0, value) / 1000;
+    }
+  }
+
+  get currentTimeMs() {
+    if (!this.audioElement) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(this.audioElement.currentTime * 1000));
+  }
+
+  get durationMs() {
+    if (!this.audioElement || !isFinite(this.audioElement.duration)) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(this.audioElement.duration * 1000));
+  }
+
   /**
    * 停止当前音频源并清理相关资源
    */

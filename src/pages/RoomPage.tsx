@@ -14,9 +14,10 @@ import type { RoomState } from "../types/store";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
+const AUDIO_SYNC_THRESHOLD_MS = 40;
+const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
 
 let domProgressPercent = 0;
-let domIsDragging = false;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
 
 const buildWsUrl = (roomId: string, token: string | null) => {
@@ -67,6 +68,18 @@ type RoomStateInitMessage = {
   };
 };
 
+type PlayControlData = {
+  progress_ms: number;
+  offset_ts: number;
+  audio_url?: string | null;
+};
+
+type PlayControlMessage = {
+  event: 20 | 21 | 22;
+  ts: number;
+  data: PlayControlData;
+};
+
 const mapStatus = (status: number): RoomState["status"] => {
   if (status === 1) return "playing";
   if (status === 2) return "ended";
@@ -78,8 +91,15 @@ function RoomPage() {
   const roomId = roomid?.trim() ?? "";
 
   const wsRef = useRef<WS | undefined>(undefined);
-  const { isConnected, latencyAvg, setConnected, setUrl, setRoomId } =
-    useWebSocketStore();
+  const {
+    isConnected,
+    latencyAvg,
+    setConnected,
+    setUrl,
+    setRoomId,
+    setWsClient,
+    getCalibratedNow,
+  } = useWebSocketStore();
   const {
     theme,
     setTheme,
@@ -107,7 +127,7 @@ function RoomPage() {
   const navigate = useNavigate();
 
   const audioRef = useRef<audioPlayer | null>(null);
-  const [audioState, setAudioState] = useState<string | undefined>(undefined);
+  const [audioState, setAudioState] = useState<string>("suspended");
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -115,6 +135,7 @@ function RoomPage() {
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
 
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
+  const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
 
   const handleBuzz = useCallback(() => {
@@ -125,6 +146,75 @@ function RoomPage() {
     // TODO: 这里后续可接入真正的抢答消息发送逻辑
   }, [isConnected]);
 
+  const sendPlaybackControl = useCallback(
+    async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
+      if (
+        !user?.isOwner ||
+        !wsRef.current?.isConnected() ||
+        !audioRef.current
+      ) {
+        return;
+      }
+
+      if (event === GameEventId.PLAY) {
+        await audioRef.current.resume();
+      } else if (event === GameEventId.PAUSE) {
+        await audioRef.current.pause();
+      }
+
+      const progressMs = audioRef.current.currentTimeMs;
+      const payload: PlayControlMessage = {
+        event,
+        ts: getCalibratedNow(),
+        data: {
+          progress_ms: progressMs,
+          offset_ts: getCalibratedNow(),
+          audio_url: SYNC_AUDIO_URL,
+        },
+      };
+
+      await wsRef.current.sendJson(payload);
+    },
+    [getCalibratedNow, user?.isOwner],
+  );
+
+  const handleTogglePlayPause = useCallback(() => {
+    const nextEvent =
+      audioState === "running" ? GameEventId.PAUSE : GameEventId.PLAY;
+    void sendPlaybackControl(nextEvent);
+  }, [audioState, sendPlaybackControl]);
+
+  const applyRemoteProgress = useCallback(
+    (message: PlayControlMessage, force = false) => {
+      if (!audioRef.current) {
+        return;
+      }
+
+      if (isProgressDraggingRef.current) {
+        return;
+      }
+
+      if (message.data.audio_url && message.data.audio_url !== SYNC_AUDIO_URL) {
+        return;
+      }
+
+      const now = getCalibratedNow();
+      const elapsed = Math.max(0, now - message.data.offset_ts);
+      const expectedMs = Math.max(0, message.data.progress_ms + elapsed);
+      const localMs = audioRef.current.currentTimeMs;
+      const shouldSeek =
+        force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
+
+      if (shouldSeek) {
+        const durationMs = audioRef.current.durationMs;
+        const clamped =
+          durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
+        audioRef.current.progressMs = clamped;
+      }
+    },
+    [getCalibratedNow],
+  );
+
   useEffect(() => {
     if (!roomId) {
       return;
@@ -134,6 +224,7 @@ function RoomPage() {
     const wsUrl = buildWsUrl(roomId, token);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
+    setWsClient(wsRef.current);
 
     wsRef.current.on(EventType.HEARTBEAT, heartbeatHandler);
     wsRef.current.onJsonEvent<RoomStateInitMessage>(
@@ -175,6 +266,26 @@ function RoomPage() {
         );
       },
     );
+    wsRef.current.onJsonEvent<PlayControlMessage>(
+      GameEventId.SEEK,
+      (message) => {
+        applyRemoteProgress(message, false);
+      },
+    );
+    wsRef.current.onJsonEvent<PlayControlMessage>(
+      GameEventId.PLAY,
+      async (message) => {
+        applyRemoteProgress(message, true);
+        await audioRef.current?.resume();
+      },
+    );
+    wsRef.current.onJsonEvent<PlayControlMessage>(
+      GameEventId.PAUSE,
+      async (message) => {
+        applyRemoteProgress(message, true);
+        await audioRef.current?.pause();
+      },
+    );
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -186,19 +297,30 @@ function RoomPage() {
       stopHeartbeat();
       wsRef.current?.close();
       wsRef.current = undefined;
+      setWsClient(undefined);
       setRoomId(null);
     };
-  }, [roomId, setConnected, setRoomId, setUrl]);
+  }, [
+    applyRemoteProgress,
+    roomId,
+    setConnected,
+    setRoomId,
+    setUrl,
+    setWsClient,
+  ]);
 
   useEffect(() => {
     audioRef.current = new audioPlayer();
-    audioRef.current.onStateChange = (state) => {
-      setAudioState(state);
-    };
     audioRef.current.volume = initialVolumeRef.current;
+    audioRef.current.onStateChange = (nextState) => {
+      setAudioState(nextState);
+    };
     setAudioState(audioRef.current.state);
+    if (canvasRef.current && canvasParentRef.current) {
+      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
+    }
     audioRef.current.onTimeUpdate = (ev) => {
-      if (progressBarRef.current && !domIsDragging) {
+      if (progressBarRef.current && !isProgressDraggingRef.current) {
         const audioElement = ev.target as HTMLAudioElement;
         const progressPercent =
           audioElement.duration > 0
@@ -207,17 +329,19 @@ function RoomPage() {
         progressBarRef.current.style.width = `${progressPercent}%`;
       }
     };
-    audioRef.current.preload(`https://cdn.modenc.top/files/Orig.mp3`);
-    audioRef.current.playUrlAsStream(
-      `https://cdn.modenc.top/files/Orig.mp3`,
-      false,
-    );
+    audioRef.current.preload(SYNC_AUDIO_URL);
+    audioRef.current.playUrlAsStream(SYNC_AUDIO_URL, false);
     return () => {
       audioRef.current?.cleanup();
       audioRef.current = null;
-      setAudioState(undefined);
     };
   }, []);
+
+  useEffect(() => {
+    if (audioRef.current && canvasRef.current && canvasParentRef.current) {
+      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
+    }
+  }, [roomId]);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -236,47 +360,61 @@ function RoomPage() {
     }
 
     const onMouseDown = (ev: MouseEvent) => {
-      domIsDragging = true;
+      isProgressDraggingRef.current = true;
       progressBarRef.current?.classList.add("no-transition");
-      domProgressPercent = (ev.offsetX / (parent.clientWidth || 1)) * 100;
+      domProgressPercent = Math.max(
+        0,
+        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
+      );
       if (progressBarRef.current) {
         progressBarRef.current.style.width = `${domProgressPercent}%`;
       }
     };
 
     const onMouseMove = (ev: MouseEvent) => {
-      if (!domIsDragging) return;
-      domProgressPercent = (ev.offsetX / (parent.clientWidth || 1)) * 100;
+      if (!isProgressDraggingRef.current) return;
+      domProgressPercent = Math.max(
+        0,
+        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
+      );
       if (progressBarRef.current) {
         progressBarRef.current.style.width = `${domProgressPercent}%`;
       }
     };
 
     const onMouseUp = (ev: MouseEvent) => {
-      if (!domIsDragging) return;
-      domIsDragging = false;
+      if (!isProgressDraggingRef.current) return;
+      isProgressDraggingRef.current = false;
       progressBarRef.current?.classList.remove("no-transition");
-      domProgressPercent = (ev.offsetX / (parent.clientWidth || 1)) * 100;
+      domProgressPercent = Math.max(
+        0,
+        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
+      );
       if (progressBarRef.current) {
         progressBarRef.current.style.width = `${domProgressPercent}%`;
       }
       if (audioRef.current) {
         audioRef.current.progress = domProgressPercent;
       }
+      void sendPlaybackControl(GameEventId.SEEK);
     };
 
     const onMouseLeave = (ev: MouseEvent) => {
-      if (!domIsDragging) return;
+      if (!isProgressDraggingRef.current) return;
       if (ev.offsetX <= 0 || ev.offsetX >= parent.clientWidth) {
-        domProgressPercent = (ev.offsetX / (parent.clientWidth || 1)) * 100;
+        domProgressPercent = Math.max(
+          0,
+          Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
+        );
         if (progressBarRef.current) {
           progressBarRef.current.style.width = `${domProgressPercent}%`;
         }
         if (audioRef.current) {
           audioRef.current.progress = domProgressPercent;
         }
+        void sendPlaybackControl(GameEventId.SEEK);
       }
-      domIsDragging = false;
+      isProgressDraggingRef.current = false;
       progressBarRef.current?.classList.remove("no-transition");
     };
 
@@ -291,7 +429,7 @@ function RoomPage() {
       parent.removeEventListener("mouseup", onMouseUp);
       parent.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [user]);
+  }, [sendPlaybackControl, user]);
 
   const setVolume = (value: number) => {
     const safeValue = Math.max(0, Math.min(200, value));
@@ -389,8 +527,12 @@ function RoomPage() {
               className={clsx("font-mono text-sm", {
                 "text-success": isConnected && latencyAvg && latencyAvg < 40,
                 "text-warning":
-                  isConnected && latencyAvg && latencyAvg >= 40 && latencyAvg < 100,
-                "text-error": !isConnected || (latencyAvg !== null && latencyAvg >= 100),
+                  isConnected &&
+                  latencyAvg &&
+                  latencyAvg >= 40 &&
+                  latencyAvg < 100,
+                "text-error":
+                  !isConnected || (latencyAvg !== null && latencyAvg >= 100),
               })}
             >
               {isConnected
@@ -437,31 +579,50 @@ function RoomPage() {
                 <h2 className="text-lg">
                   {"《崩坏：星穹铁道》× Fate[UBW] 联动PV"}
                 </h2>
-                <div className="text-md">{"HOYOMIX"}</div>
-                <div className="text-md">
+                <div className="text-md mt-4 opacity-70">{"HOYOMIX"}</div>
+                <div className="text-md opacity-70">
                   {"崩坏星穹铁道-行于命途5 Experience the Paths Vol.5"}
                 </div>
               </div>
             </div>
           </div>
         </div>
-        {user?.isOwner ? <div className="card shadow-sm min-w-xs">
-          <div className="card-body">
-            <h2 className="text-lg font-semibold flex items-center">
-              <Icon
-                icon="heroicons:command-line"
-                className="mr-2"
-                width="24"
-                height="24"
-              />
-              房间指令
-            </h2>
-            <div className="divider m-0"></div>
-            <div className="btn btn-sm" onClick={() => navigate(`/room/${roomId}/manage`)}>
-              管理页面
+        {user?.isOwner ? (
+          <div className="card shadow-sm min-w-xs">
+            <div className="card-body">
+              <div
+                className="btn btn-sm  btn-soft"
+                onClick={() => navigate(`/room/${roomId}/manage`)}
+              >
+                管理页面
+              </div>
+              <div
+                className={clsx("btn btn-sm btn-soft", {
+                  "btn-success": audioState !== "running",
+                  "btn-warning": audioState === "running",
+                })}
+                onClick={handleTogglePlayPause}
+              >
+                <Icon
+                  icon={
+                    audioState === "running" ? "heroicons:pause" : "heroicons:play"
+                  }
+                  width={16}
+                  height={16}
+                />
+                {audioState === "running" ? "暂停" : "播放"}
+              </div>
+              <div className="btn btn-info btn-sm btn-soft">
+                <Icon
+                  icon="heroicons:chevron-double-right-20-solid"
+                  width={16}
+                  height={16}
+                />
+                下一轮
+              </div>
             </div>
           </div>
-        </div> : null}
+        ) : null}
         <div className="card shadow-sm max-w-sm">
           <div className="card-body">
             <h2 className="text-lg font-semibold flex items-center">
@@ -690,27 +851,6 @@ function RoomPage() {
           <button>close</button>
         </form>
       </dialog>
-
-      <div>
-        <button
-          className="btn"
-          onClick={() => {
-            if (
-              audioRef.current &&
-              canvasRef.current &&
-              canvasParentRef.current
-            ) {
-              audioRef.current.initCanvas(
-                canvasRef.current,
-                canvasParentRef.current,
-              );
-              audioRef.current?.togglePlay();
-            }
-          }}
-        >
-          {audioState === "running" ? "Pause Audio" : "Resume Audio"}
-        </button>
-      </div>
     </div>
   );
 }

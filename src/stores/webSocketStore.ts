@@ -67,7 +67,7 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
       wsClient: undefined,
     }),
 
-  setWsClient: (wsClient: WS) => set({ wsClient }),
+  setWsClient: (wsClient: WS | undefined) => set({ wsClient }),
 
   getAverageLatency: () => {
     const { latencyHistory } = get();
