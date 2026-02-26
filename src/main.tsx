@@ -7,10 +7,7 @@ import App from "./App";
 import usePersistStore from "./stores/persistStore";
 
 const store = usePersistStore.getState();
-
-const rootDOM = document.getElementById("root");
-
-rootDOM?.setAttribute("data-theme", store.theme);
+document.documentElement.setAttribute("data-theme", store.theme);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

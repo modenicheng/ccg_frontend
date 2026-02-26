@@ -248,10 +248,10 @@ function RoomPage() {
             ></span>
             <span
               className={clsx("font-mono text-sm", {
-                "text-green-600": latencyAvg && latencyAvg < 40,
-                "text-yellow-600":
+                "text-success": latencyAvg && latencyAvg < 40,
+                "text-warning":
                   latencyAvg && latencyAvg >= 40 && latencyAvg < 100,
-                "text-red-500":
+                "text-error":
                   !isConnected || (latencyAvg && latencyAvg >= 100),
               })}
             >

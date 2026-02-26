@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const baseURL = import.meta.env.DEV ? "http://localhost:8000" : "";
+const baseURL = import.meta.env.DEV ? "" : "";
 
 export const http = axios.create({
   baseURL,

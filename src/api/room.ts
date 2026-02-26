@@ -1,9 +1,30 @@
 import { http } from "./http.ts";
 
+export interface CreateRoomRequest {
+  title: string;
+  hostName: string;
+}
+
+export interface UserLoginInfo {
+  username: string;
+  token: string;
+  isOwner: boolean;
+  id: number;
+}
+
 export interface CreateRoomResponse {
   roomId: string;
-  playerId: string;
-  token: string;
+  host: UserLoginInfo;
+}
+
+interface BackendCreateRoomResponse {
+  room_id: string;
+  host: {
+    id: number;
+    username: string;
+    is_owner: boolean;
+    token: string;
+  };
 }
 
 export interface RoomInfoResponse {
@@ -26,9 +47,23 @@ export interface PatchRoomRequest {
   tag_groups?: Record<string, string[]>;
 }
 
-export async function createRoom(): Promise<CreateRoomResponse> {
-  const { data } = await http.post<CreateRoomResponse>("/api/room/");
-  return data;
+export async function createRoom(
+  payload: CreateRoomRequest,
+): Promise<CreateRoomResponse> {
+  const { data } = await http.post<BackendCreateRoomResponse>("/api/room/", {
+    title: payload.title,
+    host_name: payload.hostName,
+  });
+
+  return {
+    roomId: data.room_id,
+    host: {
+      username: data.host.username,
+      token: data.host.token,
+      isOwner: data.host.is_owner,
+      id: data.host.id,
+    },
+  };
 }
 
 export async function getRoomInfo(roomId: string): Promise<RoomInfoResponse> {
