@@ -23,15 +23,33 @@ export interface UserState {
   isOwner: boolean;
 }
 
+export interface RoomState {
+  roomId: string;
+  hostPlayerId: string;
+  status: 'waiting' | 'playing' | 'ended';
+  title: string | null;
+  description: string | null;
+  players: string[];
+  songQueue: string[];
+  tagGroups: Record<string, string[]>;
+  playProgress: number;
+  startPositionPercent: number;
+}
+
 export interface GameState {
   audio: AudioState;
   audioMeta?: AudioMeta;
   nextAudioMeta?: AudioMeta;
   ws?: import("../wsClient").WS;
   user: UserState;
+  roomState?: RoomState;
+  isHost: boolean;
   audioManager?: unknown;
 
   setWS: (ws: import("../wsClient").WS) => void;
+  setRoomState: (roomState: RoomState) => void;
+  setIsHost: (isHost: boolean) => void;
+  refreshRoomState: () => void;
 }
 
 export interface PersistState {
@@ -55,6 +73,7 @@ export interface WebSocketState {
   clockOffset: number | null;
   clockOffsetHistory: number[];
   clockOffsetAvg: number | null;
+  wsClient: import("../wsClient").WS | undefined;
 
   setConnected: (connected: boolean) => void;
   setConnState: (state: "connecting" | "connected" | "disconnected") => void;
@@ -65,6 +84,7 @@ export interface WebSocketState {
   setError: (error: string | null) => void;
   clearError: () => void;
   reset: () => void;
+  setWsClient: (wsClient: import("../wsClient").WS) => void;
   getAverageLatency: () => number | null;
   getLatencyTrend: () => "improving" | "stable" | "deteriorating";
   getAverageClockOffset: () => number | null;

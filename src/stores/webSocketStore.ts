@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { WebSocketState } from "../types/store";
+import type { WS } from "../wsClient";
 
 const useWebSocketStore = create<WebSocketState>((set, get) => ({
   isConnected: false,
@@ -15,6 +16,7 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
   clockOffset: null,
   clockOffsetHistory: [],
   clockOffsetAvg: null,
+  wsClient: undefined,
 
   setConnected: (connected) => set({ isConnected: connected }),
   setConnState: (state) => set({ connState: state }),
@@ -62,7 +64,10 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
       error: null,
       clockOffset: null,
       clockOffsetHistory: [],
+      wsClient: undefined,
     }),
+
+  setWsClient: (wsClient: WS) => set({ wsClient }),
 
   getAverageLatency: () => {
     const { latencyHistory } = get();

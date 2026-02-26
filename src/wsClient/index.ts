@@ -146,6 +146,11 @@ class WS {
     }
   }
 
+  async sendJson(message: any) {
+    const jsonString = JSON.stringify(message);
+    await this.send(jsonString);
+  }
+
   // Check if the WebSocket is connected
   isConnected(): boolean {
     return !!this.conn && this.conn.readyState === WebSocket.OPEN;
