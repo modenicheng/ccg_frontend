@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { createRoom } from "../api/room";
+import { createRoom, joinRoom } from "../api/room";
 
 type HomeTab = "create" | "join";
 
@@ -11,8 +11,9 @@ function HomePage() {
   const [hostNameInput, setHostNameInput] = useState("");
   const [titleInput, setTitleInput] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
-  const [tokenInput, setTokenInput] = useState("");
+  const [joinNameInput, setJoinNameInput] = useState("");
   const [creating, setCreating] = useState(false);
+  const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleCreateRoom = async (ev: FormEvent) => {
@@ -46,20 +47,36 @@ function HomePage() {
     }
   };
 
-  const handleJoinRoom = (ev: FormEvent) => {
+  const handleJoinRoom = async (ev: FormEvent) => {
     ev.preventDefault();
     const roomId = roomIdInput.trim();
+    const username = joinNameInput.trim();
+
     if (!roomId) {
       setError("请输入房间号");
       return;
     }
-
-    if (tokenInput.trim()) {
-      sessionStorage.setItem(`ccg-room-token:${roomId}`, tokenInput.trim());
+    if (!username) {
+      setError("请输入用户名");
+      return;
     }
 
+    setJoining(true);
     setError(null);
-    navigate(`/room/${roomId}`);
+    try {
+      const result = await joinRoom({ roomId, username });
+      cookieStore.set(`ccg-room-token:${result.roomId}`, result.user.token);
+      cookieStore.set(`ccg-room-user-id:${result.roomId}`, `${result.user.id}`);
+      cookieStore.set(
+        `ccg-room-username:${result.roomId}`,
+        result.user.username,
+      );
+      navigate(`/room/${result.roomId}`);
+    } catch (e) {
+      setError((e as Error).message || "加入房间失败");
+    } finally {
+      setJoining(false);
+    }
   };
 
   return (
@@ -139,15 +156,19 @@ function HomePage() {
               <label className="floating-label">
                 <input
                   className="input input-bordered w-full"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="可选：房间 token"
+                  value={joinNameInput}
+                  onChange={(e) => setJoinNameInput(e.target.value)}
+                  placeholder="用户名（例如：Bob）"
                 />
-                <span>Token（可选）</span>
+                <span>用户名</span>
               </label>
 
-              <button type="submit" className="btn btn-primary">
-                加入房间
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={joining}
+              >
+                {joining ? "加入中..." : "加入房间"}
               </button>
             </form>
           )}

@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { Icon } from "@iconify-icon/react";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { WS } from "../wsClient";
 import { EventType } from "../types/eventTypes";
@@ -27,8 +27,8 @@ const makeTagId = () =>
 const buildWsUrl = (roomId: string, token: string | null) => {
   const encodedRoomId = encodeURIComponent(roomId);
   const baseOrigin = development
-    ? (import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
-      "http://localhost:8000"
+    ? ((import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
+      "http://localhost:8000")
     : window.location.origin;
 
   const url = new URL(baseOrigin);
@@ -99,6 +99,15 @@ function RoomPage() {
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
 
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
+  const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
+
+  const handleBuzz = useCallback(() => {
+    if (!isConnected) {
+      return;
+    }
+
+    // TODO: 这里后续可接入真正的抢答消息发送逻辑
+  }, [isConnected]);
 
   useEffect(() => {
     if (!roomId) {
@@ -231,6 +240,69 @@ function RoomPage() {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) {
+        return false;
+      }
+
+      const tagName = target.tagName;
+      return (
+        target.isContentEditable ||
+        tagName === "INPUT" ||
+        tagName === "TEXTAREA" ||
+        tagName === "SELECT"
+      );
+    };
+
+    const isBuzzHotkey = (ev: KeyboardEvent) => {
+      const isSpace =
+        ev.code === "Space" || ev.key === " " || ev.key === "Spacebar";
+      const isEnter = ev.key === "Enter";
+      return isSpace || isEnter;
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (!isBuzzHotkey(ev) || isEditableTarget(ev.target)) {
+        return;
+      }
+
+      ev.preventDefault();
+
+      if (ev.repeat) {
+        return;
+      }
+
+      if (!isConnected) {
+        return;
+      }
+
+      setIsBuzzHotkeyActive(true);
+      handleBuzz();
+    };
+
+    const onKeyUp = (ev: KeyboardEvent) => {
+      if (!isBuzzHotkey(ev)) {
+        return;
+      }
+      setIsBuzzHotkeyActive(false);
+    };
+
+    const onWindowBlur = () => {
+      setIsBuzzHotkeyActive(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [handleBuzz, isConnected]);
+
   if (!roomId) {
     return <Navigate to="/" replace />;
   }
@@ -251,8 +323,7 @@ function RoomPage() {
                 "text-success": latencyAvg && latencyAvg < 40,
                 "text-warning":
                   latencyAvg && latencyAvg >= 40 && latencyAvg < 100,
-                "text-error":
-                  !isConnected || (latencyAvg && latencyAvg >= 100),
+                "text-error": !isConnected || (latencyAvg && latencyAvg >= 100),
               })}
             >
               {isConnected
@@ -282,11 +353,60 @@ function RoomPage() {
         </div>
       </div>
       <div className="flex gap-2 w-full">
+        <div className="card shadow-sm max-w-sm">
+          <div className="card-body">
+            <h2 className="text-lg font-semibold flex items-center">
+              <Icon
+                icon="heroicons:home"
+                className="mr-2"
+                width="24"
+                height="24"
+              />
+              房间信息
+            </h2>
+            <div className="divider m-0"></div>
+            <p className="truncate">
+              标题： {`房间名字1111111111111111111111111111111111111111`}
+            </p>
+            <p>房主： {"Alice"}</p>
+          </div>
+        </div>
+        <div className="card shadow-sm flex-1">
+          <div className="card-body">
+            <div className="flex flex-row gap-4">
+              <figure>
+                <img
+                  className="h-32 rounded-md"
+                  src="https://music-file.y.qq.com/songlist/user/NKoqNeC5NKSA/68a3ff5b/HjXL0fy6EiixGOe8lSMEtc_190f80.jpg"
+                  alt=""
+                />
+              </figure>
+              <div className="flex flex-col gap-1">
+                <h2 className="text-2xl font-semibold">
+                  {"相见『很』晚 A Long 'Fated' Meeting"}
+                </h2>
+                <h2 className="text-lg">
+                  {"《崩坏：星穹铁道》× Fate[UBW] 联动PV"}
+                </h2>
+                <div className="text-md">{"HOYOMIX"}</div>
+                <div className="text-md">
+                  {"崩坏星穹铁道-行于命途5 Experience the Paths Vol.5"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="flex gap-2 w-full">
         <div className="card shadow-sm">
-          <div
+          <button
+            type="button"
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
               "btn-disabled": !isConnected,
+              "btn-active": isBuzzHotkeyActive,
             })}
+            disabled={!isConnected}
+            onClick={handleBuzz}
           >
             <h2 className="text-3xl">抢答！</h2>
             <div className="flex">
@@ -298,7 +418,7 @@ function RoomPage() {
                 Enter ⏎
               </div>
             </div>
-          </div>
+          </button>
         </div>
         <div className="card shadow-sm flex-1 min-h-56">
           <div className="card-body">
@@ -440,9 +560,6 @@ function RoomPage() {
         </form>
       </dialog>
 
-      <figure>
-        <img src="https://music-file.y.qq.com/songlist/user/NKoqNeC5NKSA/68a3ff5b/HjXL0fy6EiixGOe8lSMEtc_190f80.jpg" />
-      </figure>
       <div>
         <button
           className="btn"

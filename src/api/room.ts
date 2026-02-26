@@ -17,9 +17,29 @@ export interface CreateRoomResponse {
   host: UserLoginInfo;
 }
 
+export interface JoinRoomRequest {
+  roomId: string;
+  username: string;
+}
+
+export interface JoinRoomResponse {
+  roomId: string;
+  user: UserLoginInfo;
+}
+
 interface BackendCreateRoomResponse {
   room_id: string;
   host: {
+    id: number;
+    username: string;
+    is_owner: boolean;
+    token: string;
+  };
+}
+
+interface BackendJoinRoomResponse {
+  room_id: string;
+  user: {
     id: number;
     username: string;
     is_owner: boolean;
@@ -62,6 +82,27 @@ export async function createRoom(
       token: data.host.token,
       isOwner: data.host.is_owner,
       id: data.host.id,
+    },
+  };
+}
+
+export async function joinRoom(
+  payload: JoinRoomRequest,
+): Promise<JoinRoomResponse> {
+  const { data } = await http.post<BackendJoinRoomResponse>(
+    `/api/room/${encodeURIComponent(payload.roomId)}`,
+    {
+      username: payload.username,
+    },
+  );
+
+  return {
+    roomId: data.room_id,
+    user: {
+      id: data.user.id,
+      username: data.user.username,
+      isOwner: data.user.is_owner,
+      token: data.user.token,
     },
   };
 }

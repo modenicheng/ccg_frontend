@@ -13,7 +13,7 @@ const RoomManagePage: React.FC = () => {
   const [startPosition, setStartPosition] = useState<number>(0);
   const [title, setTitle] = useState<string>("");
   const [description, setDescription] = useState<string>("");
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   useEffect(() => {
     if (!roomid) {
@@ -22,19 +22,19 @@ const RoomManagePage: React.FC = () => {
     }
 
     // 检查是否是房主
-    if (!isHost) {
-      // 非房主重定向到普通房间页面
-      navigate(`/room/${roomid}`);
-      return;
-    }
+    // if (!isHost) {
+    //   // 非房主重定向到普通房间页面
+    //   navigate(`/room/${roomid}`);
+    //   return;
+    // }
 
     // 从房间状态初始化表单
-    if (roomState) {
-      setStartPosition(roomState.startPositionPercent || 0);
-      setTitle(roomState.title || "");
-      setDescription(roomState.description || "");
-      setIsLoading(false);
-    }
+    // if (roomState) {
+    //   setStartPosition(roomState.startPositionPercent || 0);
+    //   setTitle(roomState.title || "");
+    //   setDescription(roomState.description || "");
+    //   setIsLoading(false);
+    // }
   }, [roomid, navigate, isHost, roomState]);
 
   const handleStartPositionChange = (
