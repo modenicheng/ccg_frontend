@@ -199,6 +199,7 @@ class audioPlayer {
     }
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
+    audio.preload = "auto";
     audio.src = url;
     audio.loop = false;
     audio.load();
@@ -224,7 +225,11 @@ class audioPlayer {
 
     if (this.preloadTable[url]) {
       console.log(`Using preloaded audio for URL: ${url}`);
-      audio = this.preloadTable[url];
+      audio = this.preloadTable[url].cloneNode(true) as HTMLAudioElement;
+      audio.crossOrigin = "anonymous";
+      audio.preload = "auto";
+      audio.loop = false;
+      audio.currentTime = 0;
     } else {
       console.log(
         `No preloaded audio found for URL: ${url}, creating new audio element.`,
@@ -233,6 +238,7 @@ class audioPlayer {
       // 2. 创建全新的 audio 元素
       audio = new Audio();
       audio.crossOrigin = "anonymous";
+      audio.preload = "auto";
       audio.src = url;
       audio.loop = false;
       audio.load(); // 可选，设置 src 后自动开始加载

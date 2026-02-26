@@ -50,7 +50,7 @@ interface BackendJoinRoomResponse {
 export interface RoomInfoResponse {
   roomId: string;
   hostPlayerId: string;
-  status: string;
+  status: "waiting" | "playing" | "ended";
   title?: string | null;
   description?: string | null;
   players: string[];
@@ -64,8 +64,71 @@ export interface PatchRoomRequest {
   song_queue?: string[];
   title?: string;
   description?: string;
-  tag_groups?: Record<string, string[]>;
+  tagGroupIds?: number[];
 }
+
+interface BackendTagResponse {
+  id: number;
+  name: string;
+}
+
+interface BackendTagGroupResponse {
+  id: number;
+  name: string;
+  description?: string | null;
+  tags: BackendTagResponse[];
+}
+
+interface BackendRoomInfoResponse {
+  room_id: string;
+  host_player_id: string;
+  status: number;
+  title?: string | null;
+  players: Array<{ username: string; is_owner: boolean }>;
+  tag_groups: BackendTagGroupResponse[];
+}
+
+interface BackendPatchRoomRequest {
+  song_queue?: string[];
+  title?: string;
+  description?: string;
+  tag_group_ids?: number[];
+}
+
+const mapRoomStatus = (
+  status: number,
+): "waiting" | "playing" | "ended" => {
+  if (status === 1) {
+    return "playing";
+  }
+  if (status === 2) {
+    return "ended";
+  }
+  return "waiting";
+};
+
+const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse => {
+  const tagGroups = data.tag_groups.reduce<Record<string, string[]>>(
+    (acc, group) => {
+      acc[group.name] = group.tags.map((tag) => tag.name);
+      return acc;
+    },
+    {},
+  );
+
+  return {
+    roomId: data.room_id,
+    hostPlayerId: data.host_player_id,
+    status: mapRoomStatus(data.status),
+    title: data.title ?? null,
+    description: null,
+    players: data.players.map((player) => player.username),
+    songQueue: [],
+    tagGroups,
+    playProgress: 0,
+    startPositionPercent: 0,
+  };
+};
 
 export async function createRoom(
   payload: CreateRoomRequest,
@@ -108,19 +171,26 @@ export async function joinRoom(
 }
 
 export async function getRoomInfo(roomId: string): Promise<RoomInfoResponse> {
-  const { data } = await http.get<RoomInfoResponse>(
+  const { data } = await http.get<BackendRoomInfoResponse>(
     `/api/room/${encodeURIComponent(roomId)}`,
   );
-  return data;
+  return mapRoomInfo(data);
 }
 
 export async function patchRoomInfo(
   roomId: string,
   payload: PatchRoomRequest,
 ): Promise<RoomInfoResponse> {
-  const { data } = await http.patch<RoomInfoResponse>(
+  const backendPayload: BackendPatchRoomRequest = {
+    song_queue: payload.song_queue,
+    title: payload.title,
+    description: payload.description,
+    tag_group_ids: payload.tagGroupIds,
+  };
+
+  const { data } = await http.patch<BackendRoomInfoResponse>(
     `/api/room/${encodeURIComponent(roomId)}`,
-    payload,
+    backendPayload,
   );
-  return data;
+  return mapRoomInfo(data);
 }

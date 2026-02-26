@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
+import usePersistStore from "../stores/persistStore";
 
 type HomeTab = "create" | "join";
 
@@ -15,6 +16,8 @@ function HomePage() {
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const persistStore = usePersistStore();
 
   const handleCreateRoom = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -39,6 +42,10 @@ function HomePage() {
       cookieStore.set(`ccg-room-token:${room.roomId}`, room.host.token);
       cookieStore.set(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
       cookieStore.set(`ccg-room-username:${room.roomId}`, room.host.username);
+      persistStore.addUser({
+        ...room.host,
+        roomId: room.roomId,
+      });
       navigate(`/room/${room.roomId}`);
     } catch (e) {
       setError((e as Error).message || "创建房间失败");

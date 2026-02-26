@@ -1,28 +1,23 @@
 import clsx from "clsx";
 import { Icon } from "@iconify-icon/react";
-
+import { useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { WS } from "../wsClient";
-import { EventType } from "../types/eventTypes";
+import { EventType, GameEventId } from "../types/eventTypes";
 import { heartbeatHandler, startHeartbeat } from "../wsClient/handlers";
 import useWebSocketStore from "../stores/webSocketStore";
 import usePersistStore from "../stores/persistStore";
+import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
-import { TagList } from "../components";
-import type { TagItem } from "../types/tag";
+import type { RoomState } from "../types/store";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
-const TAG_MAX = 0;
 
 let domProgressPercent = 0;
 let domIsDragging = false;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
-
-const makeTagId = () =>
-  globalThis.crypto?.randomUUID?.() ??
-  `tag-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 const buildWsUrl = (roomId: string, token: string | null) => {
   const encodedRoomId = encodeURIComponent(roomId);
@@ -38,6 +33,46 @@ const buildWsUrl = (roomId: string, token: string | null) => {
   return url.toString();
 };
 
+type WsTag = {
+  id: number;
+  name: string;
+};
+
+type WsTagGroup = {
+  id: number;
+  name: string;
+  description?: string | null;
+  tags: WsTag[];
+};
+
+type WsPlayer = {
+  id: number;
+  username: string;
+  is_owner: boolean;
+};
+
+type RoomStateInitMessage = {
+  event: 12;
+  ts: number;
+  data: {
+    room_id: string;
+    title: string | null;
+    status: number;
+    host: string | null;
+    owner: string | null;
+    host_player_id: string;
+    players: WsPlayer[];
+    tag_groups: WsTagGroup[];
+    tags: WsTag[];
+  };
+};
+
+const mapStatus = (status: number): RoomState["status"] => {
+  if (status === 1) return "playing";
+  if (status === 2) return "ended";
+  return "waiting";
+};
+
 function RoomPage() {
   const { roomid } = useParams();
   const roomId = roomid?.trim() ?? "";
@@ -50,45 +85,26 @@ function RoomPage() {
     setTheme,
     volume: persistVolume,
     setVolume: setPersistVolume,
+    getRoomUser,
   } = usePersistStore();
+  const user = getRoomUser(roomId);
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
+  const initialVolumeRef = useRef<number>(persistVolume);
+  const roomState = useGameStore((state) => state.roomState);
+  const [roomOwner, setRoomOwner] = useState<string>("-");
+  const [tagGroups, setTagGroups] = useState<WsTagGroup[]>([]);
+  const [selectedTagByGroup, setSelectedTagByGroup] = useState<
+    Record<number, number | null>
+  >({});
 
-  const [tags, setTags] = useState<TagItem[]>([
-    { id: "tag1", name: "Tag 1", selected: false, canClose: false },
-    { id: "tag2", name: "Tag 2", selected: false, canClose: false },
-    { id: "tag3", name: "Tag 3", selected: false, canClose: false },
-    { id: "tag4", name: "Tag 4", selected: false, canClose: false },
-    { id: "tag5", name: "Tag 5", selected: false, canClose: false },
-  ]);
-
-  const toggleTag = (id: string) => {
-    setTags((prevTags) =>
-      prevTags.map((tag) =>
-        tag.id === id ? { ...tag, selected: !tag.selected } : tag,
-      ),
-    );
+  const selectGroupTag = (groupId: number, tagId: number) => {
+    setSelectedTagByGroup((prev) => ({
+      ...prev,
+      [groupId]: tagId,
+    }));
   };
 
-  const addTag = (name: string) => {
-    setTags((prevTags) => {
-      if (TAG_MAX > 0 && prevTags.length >= TAG_MAX) {
-        return prevTags;
-      }
-      return [
-        ...prevTags,
-        {
-          id: makeTagId(),
-          name,
-          selected: false,
-          canClose: true,
-        },
-      ];
-    });
-  };
-
-  const removeTag = (id: string) => {
-    setTags((prevTags) => prevTags.filter((tag) => tag.id !== id));
-  };
+  const navigate = useNavigate();
 
   const audioRef = useRef<audioPlayer | null>(null);
   const [audioState, setAudioState] = useState<string | undefined>(undefined);
@@ -120,6 +136,45 @@ function RoomPage() {
     wsRef.current = new WS(wsUrl, WS_RETRY);
 
     wsRef.current.on(EventType.HEARTBEAT, heartbeatHandler);
+    wsRef.current.onJsonEvent<RoomStateInitMessage>(
+      GameEventId.ROOM_STATE,
+      (message) => {
+        const payload = message.data;
+
+        const nextRoomState: RoomState = {
+          roomId: payload.room_id,
+          hostPlayerId: payload.host_player_id,
+          status: mapStatus(payload.status),
+          title: payload.title,
+          description: null,
+          players: payload.players.map((player) => player.username),
+          songQueue: [],
+          tagGroups: payload.tag_groups.reduce<Record<string, string[]>>(
+            (acc, group) => {
+              acc[group.name] = group.tags.map((tag) => tag.name);
+              return acc;
+            },
+            {},
+          ),
+          playProgress: 0,
+          startPositionPercent: 0,
+        };
+
+        gameStore.getState().setRoomState(nextRoomState);
+        setRoomOwner(payload.owner ?? payload.host ?? "-");
+
+        setTagGroups(payload.tag_groups);
+        setSelectedTagByGroup(
+          payload.tag_groups.reduce<Record<number, number | null>>(
+            (acc, group) => {
+              acc[group.id] = null;
+              return acc;
+            },
+            {},
+          ),
+        );
+      },
+    );
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -140,7 +195,7 @@ function RoomPage() {
     audioRef.current.onStateChange = (state) => {
       setAudioState(state);
     };
-    audioRef.current.volume = localVolume;
+    audioRef.current.volume = initialVolumeRef.current;
     setAudioState(audioRef.current.state);
     audioRef.current.onTimeUpdate = (ev) => {
       if (progressBarRef.current && !domIsDragging) {
@@ -162,11 +217,21 @@ function RoomPage() {
       audioRef.current = null;
       setAudioState(undefined);
     };
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = localVolume;
+    }
   }, [localVolume]);
 
   useEffect(() => {
     const parent = canvasParentRef.current;
     if (!parent) {
+      return;
+    }
+
+    if (!user?.isOwner) {
       return;
     }
 
@@ -226,13 +291,15 @@ function RoomPage() {
       parent.removeEventListener("mouseup", onMouseUp);
       parent.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, []);
+  }, [user]);
 
   const setVolume = (value: number) => {
+    const safeValue = Math.max(0, Math.min(200, value));
+    setLocalVolume(safeValue);
+    setPersistVolume(safeValue);
+
     if (audioRef.current) {
-      audioRef.current.volume = value;
-      setLocalVolume(value);
-      setPersistVolume(value);
+      audioRef.current.volume = safeValue;
     }
   };
 
@@ -320,10 +387,10 @@ function RoomPage() {
             ></span>
             <span
               className={clsx("font-mono text-sm", {
-                "text-success": latencyAvg && latencyAvg < 40,
+                "text-success": isConnected && latencyAvg && latencyAvg < 40,
                 "text-warning":
-                  latencyAvg && latencyAvg >= 40 && latencyAvg < 100,
-                "text-error": !isConnected || (latencyAvg && latencyAvg >= 100),
+                  isConnected && latencyAvg && latencyAvg >= 40 && latencyAvg < 100,
+                "text-error": !isConnected || (latencyAvg !== null && latencyAvg >= 100),
               })}
             >
               {isConnected
@@ -353,24 +420,6 @@ function RoomPage() {
         </div>
       </div>
       <div className="flex gap-2 w-full">
-        <div className="card shadow-sm max-w-sm">
-          <div className="card-body">
-            <h2 className="text-lg font-semibold flex items-center">
-              <Icon
-                icon="heroicons:home"
-                className="mr-2"
-                width="24"
-                height="24"
-              />
-              房间信息
-            </h2>
-            <div className="divider m-0"></div>
-            <p className="truncate">
-              标题： {`房间名字1111111111111111111111111111111111111111`}
-            </p>
-            <p>房主： {"Alice"}</p>
-          </div>
-        </div>
         <div className="card shadow-sm flex-1">
           <div className="card-body">
             <div className="flex flex-row gap-4">
@@ -394,6 +443,39 @@ function RoomPage() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+        {user?.isOwner ? <div className="card shadow-sm min-w-xs">
+          <div className="card-body">
+            <h2 className="text-lg font-semibold flex items-center">
+              <Icon
+                icon="heroicons:command-line"
+                className="mr-2"
+                width="24"
+                height="24"
+              />
+              房间指令
+            </h2>
+            <div className="divider m-0"></div>
+            <div className="btn btn-sm" onClick={() => navigate(`/room/${roomId}/manage`)}>
+              管理页面
+            </div>
+          </div>
+        </div> : null}
+        <div className="card shadow-sm max-w-sm">
+          <div className="card-body">
+            <h2 className="text-lg font-semibold flex items-center">
+              <Icon
+                icon="heroicons:home"
+                className="mr-2"
+                width="24"
+                height="24"
+              />
+              房间信息
+            </h2>
+            <div className="divider m-0"></div>
+            <p className="truncate">标题： {roomState?.title ?? "-"}</p>
+            <p>房主： {roomOwner}</p>
           </div>
         </div>
       </div>
@@ -432,17 +514,66 @@ function RoomPage() {
               选择 Tags
             </h2>
             <div className="divider m-0"></div>
-            <TagList
-              tags={tags}
-              onToggleTag={toggleTag}
-              onAddTag={addTag}
-              onRemoveTag={removeTag}
-              maxTags={TAG_MAX}
-              allowDuplicate={false}
-            />
+            <div className="space-y-4">
+              {tagGroups.length > 0 ? (
+                tagGroups.map((group) => {
+                  const selectedTagId = selectedTagByGroup[group.id];
+                  const selectedCount = selectedTagId ? 1 : 0;
+
+                  return (
+                    <fieldset
+                      key={group.id}
+                      className="fieldset border border-base-300 rounded-box p-3"
+                    >
+                      <legend className="fieldset-legend w-full">
+                        <div className="w-full flex items-center justify-between gap-2">
+                          <span className="ml-2 font-semibold text-base">
+                            {group.name}
+                          </span>
+                          <span
+                            className={clsx("badge badge-sm", {
+                              "badge-success badge-soft": selectedCount > 0,
+                              "badge-ghost": selectedCount === 0,
+                            })}
+                          >
+                            {selectedCount ? "已选择" : "未选择"}
+                          </span>
+                        </div>
+                      </legend>
+
+                      {group.description ? (
+                        <p className="mb-1">{group.description}</p>
+                      ) : null}
+
+                      <div className="flex flex-wrap gap-4">
+                        {group.tags.map((tag) => (
+                          <label
+                            key={tag.id}
+                            className="label cursor-pointer gap-2"
+                          >
+                            <input
+                              type="radio"
+                              name={`tag-group-${group.id}`}
+                              className="radio radio-primary radio-sm"
+                              checked={selectedTagByGroup[group.id] === tag.id}
+                              onChange={() => selectGroupTag(group.id, tag.id)}
+                            />
+                            <span className="text-sm">{tag.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  );
+                })
+              ) : (
+                <div className="alert alert-soft alert-warning">
+                  暂无可选标签分组
+                </div>
+              )}
+            </div>
           </div>
         </div>
-        <div className="card shadow-sm w-1/5 max-w-md min-w-3xs">
+        <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
           <div className="card-body p-2">
             <ul className="list">
               <li className="list-row">

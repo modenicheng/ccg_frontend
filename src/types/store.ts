@@ -17,8 +17,8 @@ export interface AudioMeta {
 
 export interface UserState {
   id: number;
+  roomId: string;
   username: string;
-  suffix: string;
   token: string;
   isOwner: boolean;
 }
@@ -26,7 +26,7 @@ export interface UserState {
 export interface RoomState {
   roomId: string;
   hostPlayerId: string;
-  status: 'waiting' | 'playing' | 'ended';
+  status: "waiting" | "playing" | "ended";
   title: string | null;
   description: string | null;
   players: string[];
@@ -55,8 +55,12 @@ export interface GameState {
 export interface PersistState {
   theme: string;
   volume: number;
+  users: UserState[];
   setTheme: (theme: string) => void;
   setVolume: (volume: number) => void;
+  addUser: (user: UserState) => void;
+  removeUser: (userId: number) => void;
+  getRoomUser: (roomId: string) => UserState | undefined;
 }
 
 export interface WebSocketState {

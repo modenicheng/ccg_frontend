@@ -1,4 +1,4 @@
-import { EventType } from "../types/eventTypes";
+import { EventType, type GameEventId } from "../types/eventTypes";
 
 interface retryConfig {
   max: number;
@@ -17,6 +17,8 @@ class WS {
   private reconnectTimeout?: number;
   private closed: boolean = false;
   private handlers: Map<EventType, Handler<ArrayBuffer | string>> = new Map();
+  private jsonHandlers: Map<string, Handler<unknown>> = new Map();
+  private jsonEventHandlers: Map<GameEventId, Handler<unknown>> = new Map();
   private stateChangeCallback?: (connected: boolean) => void;
 
   constructor(url: string, retryConfig?: Partial<retryConfig>) {
@@ -43,6 +45,22 @@ class WS {
 
   off(eventType: EventType) {
     this.handlers.delete(eventType);
+  }
+
+  onJson<T = unknown>(messageType: string, handler: Handler<T>) {
+    this.jsonHandlers.set(messageType, handler as Handler<unknown>);
+  }
+
+  offJson(messageType: string) {
+    this.jsonHandlers.delete(messageType);
+  }
+
+  onJsonEvent<T = unknown>(eventId: GameEventId, handler: Handler<T>) {
+    this.jsonEventHandlers.set(eventId, handler as Handler<unknown>);
+  }
+
+  offJsonEvent(eventId: GameEventId) {
+    this.jsonEventHandlers.delete(eventId);
   }
 
   // Register a callback for connection state changes
@@ -88,7 +106,7 @@ class WS {
           console.warn(`No handler registered for event type ${eventType}`);
         }
       } else if (typeof ev.data === "string") {
-        let message
+        let message;
         try {
           message = JSON.parse(ev.data);
         } catch (e) {
@@ -96,6 +114,33 @@ class WS {
           return;
         }
         console.debug(`Received text message: \n`, message);
+
+        const messageType =
+          message && typeof message === "object" ? (message.type as string | undefined) : undefined;
+        const messageEvent =
+          message && typeof message === "object" ? (message.event as GameEventId | undefined) : undefined;
+
+        if (messageType) {
+          const jsonHandler = this.jsonHandlers.get(messageType);
+          if (jsonHandler) {
+            if (typeof jsonHandler === "function") {
+              await jsonHandler(message, this);
+            } else {
+              console.warn(`Handler for JSON message type ${messageType} is not a function`);
+            }
+          }
+        }
+
+        if (messageEvent !== undefined) {
+          const eventHandler = this.jsonEventHandlers.get(messageEvent);
+          if (eventHandler) {
+            if (typeof eventHandler === "function") {
+              await eventHandler(message, this);
+            } else {
+              console.warn(`Handler for JSON event ${messageEvent} is not a function`);
+            }
+          }
+        }
       }
     };
   }

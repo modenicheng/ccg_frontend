@@ -25,9 +25,9 @@ export const gameStore = create<GameState>((set, get) => ({
   user: {
     id: 0,
     username: "",
-    suffix: "",
     token: "",
     isOwner: false,
+    roomId: "",
   },
   roomState: undefined,
   isHost: false,
