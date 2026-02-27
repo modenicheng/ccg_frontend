@@ -343,6 +343,18 @@ function RoomPage() {
         }
       },
     );
+    
+    wsRef.current.onJsonEvent(
+      GameEventId.SCORE_UPDATE,
+      (message) => {
+        // 处理得分更新
+        if (message.data?.scores) {
+          // 更新游戏状态中的得分信息
+          console.log('Score updated:', message.data.scores);
+          gameStore.getState().setScores(message.data.scores);
+        }
+      },
+    );
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
@@ -867,26 +879,26 @@ function RoomPage() {
                 <th className="w-4 text-end">排名</th>
                 <th className="">玩家</th>
                 <td className="w-6 text-end">总分</td>
-                {new Array(125).fill(0).map((_, i) => (
-                  <td key={i} className="">
-                    第{i + 1}轮
-                  </td>
-                ))}
               </tr>
             </thead>
             <tbody>
-              {new Array(20).fill(0).map((_, i) => (
-                <tr key={i} className="">
-                  <th className="text-end">{i + 1}</th>
-                  <th className="text-nowrap">玩家{i + 1}</th>
-                  <td className="text-end">{100 - i * 10}</td>
-                  {new Array(125).fill(0).map((_, roundIndex) => (
-                    <td key={roundIndex} className="w-16">
-                      1
-                    </td>
-                  ))}
+              {gameStore.getState().scores.length > 0 ? (
+                gameStore.getState().scores
+                  .sort((a, b) => b.score - a.score)
+                  .map((player, index) => (
+                    <tr key={player.player_id} className="">
+                      <th className="text-end">{index + 1}</th>
+                      <th className="text-nowrap">{player.username}</th>
+                      <td className="text-end">{player.score}</td>
+                    </tr>
+                  ))
+              ) : (
+                <tr>
+                  <td colSpan={3} className="text-center">
+                    暂无得分记录
+                  </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>

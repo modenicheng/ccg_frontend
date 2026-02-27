@@ -36,6 +36,12 @@ export interface RoomState {
   startPositionPercent: number;
 }
 
+export interface PlayerScore {
+  player_id: number;
+  username: string;
+  score: number;
+}
+
 export interface GameState {
   audio: AudioState;
   audioMeta?: AudioMeta;
@@ -44,11 +50,13 @@ export interface GameState {
   user: UserState;
   roomState?: RoomState;
   isHost: boolean;
+  scores: PlayerScore[];
   audioManager?: unknown;
 
   setWS: (ws: import("../wsClient").WS) => void;
   setRoomState: (roomState: RoomState) => void;
   setIsHost: (isHost: boolean) => void;
+  setScores: (scores: PlayerScore[]) => void;
   refreshRoomState: () => Promise<void>;
 }
 
