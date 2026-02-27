@@ -157,8 +157,6 @@ const RoomManagePage = () => {
   const [roomSongsError, setRoomSongsError] = useState<string | null>(null);
   const [roomSongsSuccess, setRoomSongsSuccess] = useState<string | null>(null);
   const [selectedRoomSongIds, setSelectedRoomSongIds] = useState<number[]>([]);
-  const [showClearRoomSongsConfirm, setShowClearRoomSongsConfirm] =
-    useState(false);
   const roomSongsPageSize = 10;
 
   const loadTagGroups = useCallback(async () => {
@@ -989,7 +987,6 @@ const RoomManagePage = () => {
   };
 
   const handleOpenClearRoomSongsConfirm = () => {
-    setShowClearRoomSongsConfirm(true);
     clearRoomSongsConfirmDialogRef.current?.showModal();
   };
 
@@ -1007,7 +1004,6 @@ const RoomManagePage = () => {
       setRoomSongsError((err as Error).message || "清空房间歌曲失败");
     } finally {
       clearRoomSongsConfirmDialogRef.current?.close();
-      setShowClearRoomSongsConfirm(false);
     }
   };
 
@@ -2362,7 +2358,6 @@ const RoomManagePage = () => {
               className="btn btn-ghost"
               onClick={() => {
                 clearRoomSongsConfirmDialogRef.current?.close();
-                setShowClearRoomSongsConfirm(false);
               }}
             >
               取消
@@ -2377,9 +2372,7 @@ const RoomManagePage = () => {
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">
-          <button onClick={() => setShowClearRoomSongsConfirm(false)}>
-            close
-          </button>
+          <button>close</button>
         </form>
       </dialog>
 

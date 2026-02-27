@@ -29,6 +29,7 @@ export const UserBar: React.FC<UserBarProps> = ({
                 "badge badge-primary transition-all w-16",
                 "justify-end -ml-8",
                 "font-mono",
+                " ease-out",
                 {
                   "badge-soft": answering,
                   "userbar-active": activate,
@@ -39,7 +40,7 @@ export const UserBar: React.FC<UserBarProps> = ({
               {order ?? "-"}
             </div>
             <div
-              className={clsx("font-semibold text-base transition-all", {
+              className={clsx("font-semibold text-base transition-all ease-out", {
                 "text-primary-content": answering,
                 "text-primary translate-x-0": activate,
                 "-translate-x-10": !activate,
@@ -47,6 +48,7 @@ export const UserBar: React.FC<UserBarProps> = ({
             >
               {username}
             </div>
+            <div className="badge badge-soft badge-info ml-auto">我</div>
           </div>
         </div>
       </div>
