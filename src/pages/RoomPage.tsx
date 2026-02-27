@@ -129,6 +129,14 @@ function RoomPage() {
   const [selectedTagByGroup, setSelectedTagByGroup] = useState<
     Record<number, number | null>
   >({});
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isJudging, setIsJudging] = useState<boolean>(false);
+  const [currentSong, setCurrentSong] = useState<{
+    title: string;
+    artist: string;
+    album: string;
+    coverUrl: string;
+  } | null>(null);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -299,6 +307,27 @@ function RoomPage() {
       async (message) => {
         applyRemoteProgress(message, true);
         await audioRef.current?.resume();
+        setIsPlaying(true);
+        setIsJudging(false);
+        // 播放时隐藏曲目信息
+        setCurrentSong(null);
+      },
+    );
+    
+    wsRef.current.onJsonEvent(
+      GameEventId.JUDGING,
+      (message) => {
+        setIsPlaying(false);
+        setIsJudging(true);
+        // 判分时显示完整曲目信息
+        if (message.data?.song) {
+          setCurrentSong({
+            title: message.data.song.title || "",
+            artist: message.data.song.artist || "",
+            album: message.data.song.album || "",
+            coverUrl: message.data.song.cover_url || ""
+          });
+        }
       },
     );
     wsRef.current.onJsonEvent<PlayControlMessage>(
@@ -618,20 +647,20 @@ function RoomPage() {
               <figure>
                 <img
                   className="h-32 rounded-md"
-                  src="https://music-file.y.qq.com/songlist/user/NKoqNeC5NKSA/68a3ff5b/HjXL0fy6EiixGOe8lSMEtc_190f80.jpg"
+                  src={isJudging && currentSong ? currentSong.coverUrl : "https://via.placeholder.com/128x128/cccccc/666666?text=?"}
                   alt=""
                 />
               </figure>
               <div className="flex flex-col gap-1">
                 <h2 className="text-2xl font-semibold">
-                  {"相见『很』晚 A Long 'Fated' Meeting"}
+                  {isJudging && currentSong ? currentSong.title : "????????????????"}
                 </h2>
                 <h2 className="text-lg">
-                  {"《崩坏：星穹铁道》× Fate[UBW] 联动PV"}
+                  {isJudging && currentSong ? currentSong.album : "????????????????"}
                 </h2>
-                <div className="text-md mt-4 opacity-70">{"HOYOMIX"}</div>
+                <div className="text-md mt-4 opacity-70">{isJudging && currentSong ? currentSong.artist : "????????"}</div>
                 <div className="text-md opacity-70">
-                  {"崩坏星穹铁道-行于命途5 Experience the Paths Vol.5"}
+                  {isJudging && currentSong ? currentSong.album : "????????????????????????"}
                 </div>
               </div>
             </div>
