@@ -31,6 +31,7 @@ export const gameStore = create<GameState>((set, get) => ({
   },
   roomState: undefined,
   isHost: false,
+  scores: [],
 
   // Action to set the WebSocket instance
   setWS: (ws: WS) => {
@@ -45,6 +46,11 @@ export const gameStore = create<GameState>((set, get) => ({
   // Action to set host status
   setIsHost: (isHost: boolean) => {
     set({ isHost });
+  },
+
+  // Action to set scores
+  setScores: (scores: import("../types/store").PlayerScore[]) => {
+    set({ scores });
   },
 
   // Action to refresh room state
