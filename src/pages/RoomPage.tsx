@@ -81,6 +81,19 @@ type PlayControlMessage = {
   data: PlayControlData;
 };
 
+type JudgingMessage = {
+  event: typeof GameEventId.JUDGING;
+  ts: number;
+  data: {
+    song?: {
+      title?: string;
+      artist?: string;
+      album?: string;
+      cover_url?: string;
+    };
+  };
+};
+
 const isPlayControlData = (value: unknown): value is PlayControlData => {
   if (!value || typeof value !== "object") {
     return false;
@@ -313,8 +326,8 @@ function RoomPage() {
         setCurrentSong(null);
       },
     );
-    
-    wsRef.current.onJsonEvent(
+
+    wsRef.current.onJsonEvent<JudgingMessage>(
       GameEventId.JUDGING,
       (message) => {
         setIsPlaying(false);
@@ -325,7 +338,7 @@ function RoomPage() {
             title: message.data.song.title || "",
             artist: message.data.song.artist || "",
             album: message.data.song.album || "",
-            coverUrl: message.data.song.cover_url || ""
+            coverUrl: message.data.song.cover_url || "",
           });
         }
       },
@@ -647,20 +660,32 @@ function RoomPage() {
               <figure>
                 <img
                   className="h-32 rounded-md"
-                  src={isJudging && currentSong ? currentSong.coverUrl : "https://via.placeholder.com/128x128/cccccc/666666?text=?"}
+                  src={
+                    isJudging && currentSong
+                      ? currentSong.coverUrl
+                      : "https://via.placeholder.com/128x128/cccccc/666666?text=?"
+                  }
                   alt=""
                 />
               </figure>
               <div className="flex flex-col gap-1">
                 <h2 className="text-2xl font-semibold">
-                  {isJudging && currentSong ? currentSong.title : "????????????????"}
+                  {isJudging && currentSong
+                    ? currentSong.title
+                    : "????????????????"}
                 </h2>
                 <h2 className="text-lg">
-                  {isJudging && currentSong ? currentSong.album : "????????????????"}
+                  {isJudging && currentSong
+                    ? currentSong.album
+                    : "????????????????"}
                 </h2>
-                <div className="text-md mt-4 opacity-70">{isJudging && currentSong ? currentSong.artist : "????????"}</div>
+                <div className="text-md mt-4 opacity-70">
+                  {isJudging && currentSong ? currentSong.artist : "????????"}
+                </div>
                 <div className="text-md opacity-70">
-                  {isJudging && currentSong ? currentSong.album : "????????????????????????"}
+                  {isJudging && currentSong
+                    ? currentSong.album
+                    : "????????????????????????"}
                 </div>
               </div>
             </div>
@@ -684,7 +709,9 @@ function RoomPage() {
               >
                 <Icon
                   icon={
-                    audioState === "running" ? "heroicons:pause" : "heroicons:play"
+                    audioState === "running"
+                      ? "heroicons:pause"
+                      : "heroicons:play"
                   }
                   width={16}
                   height={16}

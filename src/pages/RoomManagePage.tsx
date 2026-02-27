@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify-icon/react";
 import { TagList } from "../components";
@@ -19,6 +19,29 @@ import {
 } from "../api/tags";
 import { GameEventId } from "../types/eventTypes";
 import type { TagItem } from "../types/tag";
+import {
+  getSongs,
+  createSong,
+  updateSong,
+  deleteSong,
+  type Song,
+  type CreateSongRequest,
+} from "../api/song";
+import {
+  getSonglists,
+  getSonglistDetail,
+  createSonglistFromPlatform,
+  deleteSonglist,
+  type Songlist,
+  type CreateSonglistFromPlatformRequest,
+} from "../api/songlist";
+import {
+  getRoomSongs,
+  addSongsToRoom,
+  removeSongsFromRoom,
+  clearRoomSongs,
+  type RoomSong,
+} from "../api/room_songs";
 
 const RoomManagePage = () => {
   const { roomid } = useParams<{ roomid: string }>();
@@ -41,6 +64,9 @@ const RoomManagePage = () => {
   const editTagDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteTagConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteSongConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const deleteSonglistConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const clearRoomSongsConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const [manageTags, setManageTags] = useState<Tag[]>([]);
   const [manageTagGroups, setManageTagGroups] = useState<TagGroup[]>([]);
   const [groupTagIds, setGroupTagIds] = useState<number[]>([]);
@@ -75,7 +101,67 @@ const RoomManagePage = () => {
   const [initialEditingGroupDescription, setInitialEditingGroupDescription] =
     useState("");
 
-  const loadTagGroups = async () => {
+  // 歌曲管理状态
+  const songManageDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [songManageTab, setSongManageTab] = useState<"songs" | "songlists">(
+    "songs",
+  );
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [songlists, setSonglists] = useState<Songlist[]>([]);
+  const [songPage, setSongPage] = useState(1);
+  const [songTotal, setSongTotal] = useState(0);
+  const [songlistPage, setSonglistPage] = useState(1);
+  const [songlistTotal, setSonglistTotal] = useState(0);
+  const songPageSize = 10;
+  const songlistPageSize = 10;
+  const [isSongManageLoading, setIsSongManageLoading] = useState(false);
+  const [songManageError, setSongManageError] = useState<string | null>(null);
+  const [songManageSuccess, setSongManageSuccess] = useState<string | null>(
+    null,
+  );
+  // 歌曲表单
+  const [newSong, setNewSong] = useState<CreateSongRequest>({});
+  const [editingSongId, setEditingSongId] = useState<number | null>(null);
+  const [editingSongData, setEditingSongData] = useState<CreateSongRequest>({});
+  const [isCreatingSong, setIsCreatingSong] = useState(false);
+  const [isUpdatingSong, setIsUpdatingSong] = useState(false);
+  const [pendingDeleteSongId, setPendingDeleteSongId] = useState<number | null>(
+    null,
+  );
+  const [confirmDeleteSongId, setConfirmDeleteSongId] = useState<number | null>(
+    null,
+  );
+  // 歌单表单
+  const [newSonglistPlatform, setNewSonglistPlatform] = useState("qq");
+  const [newSonglistPlatformId, setNewSonglistPlatformId] = useState("");
+  const [newSonglistCookie, setNewSonglistCookie] = useState("");
+  const [isCreatingSonglist, setIsCreatingSonglist] = useState(false);
+  const [pendingDeleteSonglistId, setPendingDeleteSonglistId] = useState<
+    number | null
+  >(null);
+  const [confirmDeleteSonglistId, setConfirmDeleteSonglistId] = useState<
+    number | null
+  >(null);
+  // 绑定歌单到房间
+  const [bindSonglistId, setBindSonglistId] = useState<number | null>(null);
+  const [isBindingSonglist, setIsBindingSonglist] = useState(false);
+  // 添加单曲到房间
+  const [addSingleSongId, setAddSingleSongId] = useState<number | null>(null);
+  const [isAddingSingleSong, setIsAddingSingleSong] = useState(false);
+
+  // 房间歌曲状态
+  const [roomSongs, setRoomSongs] = useState<RoomSong[]>([]);
+  const [roomSongsPage, setRoomSongsPage] = useState(1);
+  const [roomSongsTotal, setRoomSongsTotal] = useState(0);
+  const [isLoadingRoomSongs, setIsLoadingRoomSongs] = useState(false);
+  const [roomSongsError, setRoomSongsError] = useState<string | null>(null);
+  const [roomSongsSuccess, setRoomSongsSuccess] = useState<string | null>(null);
+  const [selectedRoomSongIds, setSelectedRoomSongIds] = useState<number[]>([]);
+  const [showClearRoomSongsConfirm, setShowClearRoomSongsConfirm] =
+    useState(false);
+  const roomSongsPageSize = 10;
+
+  const loadTagGroups = useCallback(async () => {
     const allGroups = await getTagGroups();
     setTagGroups(allGroups);
 
@@ -84,9 +170,101 @@ const RoomManagePage = () => {
     setInitialSelectedIds((prev) => prev.filter((id) => validIds.has(id)));
 
     return allGroups;
+  }, []);
+
+  const loadSongs = useCallback(
+    async (page = songPage) => {
+      try {
+        const { list, total } = await getSongs({
+          offset: (page - 1) * songPageSize,
+          limit: songPageSize,
+        });
+        setSongs(list);
+        setSongTotal(total);
+      } catch (err) {
+        setSongManageError((err as Error).message || "加载歌曲列表失败");
+      }
+    },
+    [songPage],
+  );
+
+  const loadRoomSongs = useCallback(
+    async (page: number) => {
+      if (!roomid) return;
+      setIsLoadingRoomSongs(true);
+      setRoomSongsError(null);
+      try {
+        const data = await getRoomSongs(roomid, {
+          offset: (page - 1) * roomSongsPageSize,
+          limit: roomSongsPageSize,
+        });
+        setRoomSongs(data.list);
+        setRoomSongsTotal(data.total);
+        setSelectedRoomSongIds((prev) =>
+          prev.filter((id) => data.list.some((song) => song.song_id === id)),
+        );
+        return data;
+      } catch (err) {
+        setRoomSongsError((err as Error).message || "加载房间歌曲失败");
+      } finally {
+        setIsLoadingRoomSongs(false);
+      }
+    },
+    [roomid],
+  );
+
+  const loadSonglists = useCallback(
+    async (page = songlistPage) => {
+      try {
+        const offset = (page - 1) * songlistPageSize;
+        const { list, total } = await getSonglists({
+          offset,
+          limit: songlistPageSize,
+        });
+        setSonglists(list);
+        setSonglistTotal(total);
+      } catch (err) {
+        setSongManageError((err as Error).message || "加载歌单列表失败");
+      }
+    },
+    [songlistPage],
+  );
+
+  const songHasPrev = songPage > 1;
+  const songTotalPages = Math.max(1, Math.ceil(songTotal / songPageSize));
+  const songHasNext = songPage < songTotalPages;
+  const songlistHasPrev = songlistPage > 1;
+  const songlistTotalPages = Math.max(
+    1,
+    Math.ceil(songlistTotal / songlistPageSize),
+  );
+  const songlistHasNext = songlistPage < songlistTotalPages;
+  const roomSongsHasPrev = roomSongsPage > 1;
+  const roomSongsTotalPages = Math.max(
+    1,
+    Math.ceil(roomSongsTotal / roomSongsPageSize),
+  );
+  const roomSongsHasNext = roomSongsPage < roomSongsTotalPages;
+
+  const handleSongPageChange = async (nextPage: number) => {
+    if (nextPage < 1 || nextPage === songPage) return;
+    setSongPage(nextPage);
+    await loadSongs(nextPage);
   };
 
-  const loadManageData = async () => {
+  const handleSonglistPageChange = async (nextPage: number) => {
+    if (nextPage < 1 || nextPage === songlistPage) return;
+    setSonglistPage(nextPage);
+    await loadSonglists(nextPage);
+  };
+
+  const handleRoomSongsPageChange = async (nextPage: number) => {
+    if (nextPage < 1 || nextPage === roomSongsPage) return;
+    setRoomSongsPage(nextPage);
+    await loadRoomSongs(nextPage);
+  };
+
+  const loadManageData = useCallback(async () => {
     setIsManageLoading(true);
     setManageError(null);
     try {
@@ -109,7 +287,7 @@ const RoomManagePage = () => {
     } finally {
       setIsManageLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -128,6 +306,8 @@ const RoomManagePage = () => {
           getRoomInfo(roomid),
           loadTagGroups(),
         ]);
+        setRoomSongsPage(1);
+        await loadRoomSongs(1);
 
         if (!isMounted) {
           return;
@@ -168,7 +348,7 @@ const RoomManagePage = () => {
     return () => {
       isMounted = false;
     };
-  }, [navigate, roomid]);
+  }, [loadRoomSongs, loadTagGroups, navigate, roomid]);
 
   useEffect(() => {
     if (!manageError && !manageSuccess) {
@@ -184,6 +364,21 @@ const RoomManagePage = () => {
       window.clearTimeout(timer);
     };
   }, [manageError, manageSuccess]);
+
+  useEffect(() => {
+    if (!roomSongsError && !roomSongsSuccess) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRoomSongsError(null);
+      setRoomSongsSuccess(null);
+    }, 5_000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [roomSongsError, roomSongsSuccess]);
 
   const hasChanges = useMemo(() => {
     const titleChanged = title.trim() !== initialTitle.trim();
@@ -582,6 +777,289 @@ const RoomManagePage = () => {
     }
   };
 
+  const handleOpenSongManageDialog = async () => {
+    songManageDialogRef.current?.showModal();
+    setSongManageSuccess(null);
+    setSongPage(1);
+    setSongTotal(0);
+    setSonglistPage(1);
+    setSonglistTotal(0);
+    setIsSongManageLoading(true);
+    setSongManageError(null);
+    try {
+      await Promise.all([loadSongs(1), loadSonglists(1)]);
+    } catch (err) {
+      setSongManageError((err as Error).message || "加载歌曲管理数据失败");
+    } finally {
+      setIsSongManageLoading(false);
+    }
+  };
+
+  const handleCreateSong = async () => {
+    if (!newSong.title?.trim()) {
+      setSongManageError("歌曲标题不能为空");
+      return;
+    }
+    setIsCreatingSong(true);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      await createSong(newSong);
+      setNewSong({});
+      setSongManageSuccess("歌曲创建成功");
+      if (songPage !== 1) {
+        setSongPage(1);
+      }
+      await loadSongs(1);
+    } catch (err) {
+      setSongManageError((err as Error).message || "创建歌曲失败");
+    } finally {
+      setIsCreatingSong(false);
+    }
+  };
+
+  const handleStartEditSong = (song: Song) => {
+    setEditingSongId(song.id);
+    setEditingSongData({
+      platform: song.platform ?? undefined,
+      platform_song_id: song.platform_song_id ?? undefined,
+      title: song.title ?? undefined,
+      subtitle: song.subtitle ?? undefined,
+      artist: song.artist ?? undefined,
+      album_name: song.album_name ?? undefined,
+      album_id: song.album_id ?? undefined,
+      cover_url: song.cover_url ?? undefined,
+      audio_url: song.audio_url ?? undefined,
+      cached_path: song.cached_path ?? undefined,
+      metadata_json: song.metadata_json ?? undefined,
+    });
+    setSongManageError(null);
+    setSongManageSuccess(null);
+  };
+
+  const handleCancelEditSong = () => {
+    setEditingSongId(null);
+    setEditingSongData({});
+  };
+
+  const handleSaveEditSong = async () => {
+    if (!editingSongId) return;
+    if (!editingSongData.title?.trim()) {
+      setSongManageError("歌曲标题不能为空");
+      return;
+    }
+    setIsUpdatingSong(true);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      await updateSong(editingSongId, editingSongData);
+      setSongManageSuccess("歌曲更新成功");
+      handleCancelEditSong();
+      await loadSongs(songPage);
+    } catch (err) {
+      setSongManageError((err as Error).message || "更新歌曲失败");
+    } finally {
+      setIsUpdatingSong(false);
+    }
+  };
+
+  const handleDeleteSong = (songId: number) => {
+    setConfirmDeleteSongId(songId);
+    deleteSongConfirmDialogRef.current?.showModal();
+  };
+
+  const handleConfirmDeleteSong = async () => {
+    if (!confirmDeleteSongId) return;
+
+    setPendingDeleteSongId(confirmDeleteSongId);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      await deleteSong(confirmDeleteSongId);
+      setSongManageSuccess("歌曲删除成功");
+      await loadSongs(songPage);
+    } catch (err) {
+      setSongManageError((err as Error).message || "删除歌曲失败");
+    } finally {
+      setPendingDeleteSongId(null);
+      deleteSongConfirmDialogRef.current?.close();
+      setConfirmDeleteSongId(null);
+    }
+  };
+
+  const handleCreateSonglist = async () => {
+    if (!newSonglistPlatformId.trim()) {
+      setSongManageError("歌单平台ID不能为空");
+      return;
+    }
+    setIsCreatingSonglist(true);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      const payload: CreateSonglistFromPlatformRequest = {
+        platform: newSonglistPlatform,
+        platform_songlist_id: newSonglistPlatformId,
+        cookie_str: newSonglistCookie || undefined,
+      };
+      const { task_id } = await createSonglistFromPlatform(payload);
+      setSongManageSuccess(`歌单创建任务已提交，任务ID: ${task_id}`);
+      setNewSonglistPlatformId("");
+      setNewSonglistCookie("");
+      // 可以轮询任务状态，这里简化，直接重新加载歌单列表
+      setTimeout(() => {
+        if (songlistPage !== 1) {
+          setSonglistPage(1);
+        }
+        loadSonglists(1);
+      }, 2000);
+    } catch (err) {
+      setSongManageError((err as Error).message || "创建歌单失败");
+    } finally {
+      setIsCreatingSonglist(false);
+    }
+  };
+
+  const handleDeleteSonglist = (songlistId: number) => {
+    setConfirmDeleteSonglistId(songlistId);
+    deleteSonglistConfirmDialogRef.current?.showModal();
+  };
+
+  const handleConfirmDeleteSonglist = async () => {
+    if (!confirmDeleteSonglistId) return;
+
+    setPendingDeleteSonglistId(confirmDeleteSonglistId);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      await deleteSonglist(confirmDeleteSonglistId);
+      setSongManageSuccess("歌单删除成功");
+      await loadSonglists(songlistPage);
+    } catch (err) {
+      setSongManageError((err as Error).message || "删除歌单失败");
+    } finally {
+      setPendingDeleteSonglistId(null);
+      deleteSonglistConfirmDialogRef.current?.close();
+      setConfirmDeleteSonglistId(null);
+    }
+  };
+
+  const handleAddSingleSongToRoom = async () => {
+    if (!addSingleSongId || !roomid) return;
+    setIsAddingSingleSong(true);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      // 使用新的room_songs API添加歌曲到房间
+      await addSongsToRoom(roomid, {
+        song_ids: [addSingleSongId],
+        append_to_end: true,
+      });
+      setSongManageSuccess("单曲已添加到房间队列");
+      setAddSingleSongId(null);
+      // 重新加载房间歌曲列表
+      setRoomSongsPage(1);
+      await loadRoomSongs(1);
+    } catch (err) {
+      setSongManageError((err as Error).message || "添加单曲到房间失败");
+    } finally {
+      setIsAddingSingleSong(false);
+    }
+  };
+
+  const handleRemoveSongsFromRoom = async (songIds: number[]) => {
+    if (!roomid || songIds.length === 0) return;
+    setRoomSongsError(null);
+    setRoomSongsSuccess(null);
+    try {
+      await removeSongsFromRoom(roomid, {
+        song_ids: songIds,
+      });
+      setRoomSongsSuccess(`${songIds.length}首歌曲已从房间移除`);
+      setSelectedRoomSongIds([]);
+      const currentPage = roomSongsPage;
+      const data = await loadRoomSongs(currentPage);
+      if (data && data.list.length === 0 && currentPage > 1) {
+        const prevPage = currentPage - 1;
+        setRoomSongsPage(prevPage);
+        await loadRoomSongs(prevPage);
+      }
+    } catch (err) {
+      setRoomSongsError((err as Error).message || "从房间移除歌曲失败");
+    }
+  };
+
+  const handleOpenClearRoomSongsConfirm = () => {
+    setShowClearRoomSongsConfirm(true);
+    clearRoomSongsConfirmDialogRef.current?.showModal();
+  };
+
+  const handleClearRoomSongs = async () => {
+    if (!roomid) return;
+    setRoomSongsError(null);
+    setRoomSongsSuccess(null);
+    try {
+      await clearRoomSongs(roomid);
+      setRoomSongsSuccess("房间歌曲已清空");
+      setSelectedRoomSongIds([]);
+      setRoomSongsPage(1);
+      await loadRoomSongs(1);
+    } catch (err) {
+      setRoomSongsError((err as Error).message || "清空房间歌曲失败");
+    } finally {
+      clearRoomSongsConfirmDialogRef.current?.close();
+      setShowClearRoomSongsConfirm(false);
+    }
+  };
+
+  const toggleRoomSongSelection = (songId: number) => {
+    setSelectedRoomSongIds((prev) =>
+      prev.includes(songId)
+        ? prev.filter((id) => id !== songId)
+        : [...prev, songId],
+    );
+  };
+
+  const handleSelectAllRoomSongs = () => {
+    if (!roomSongs || !Array.isArray(roomSongs)) return;
+    if (selectedRoomSongIds.length === roomSongs.length) {
+      setSelectedRoomSongIds([]);
+    } else {
+      setSelectedRoomSongIds(roomSongs.map((song) => song.song_id));
+    }
+  };
+
+  const handleBindSonglistToRoom = async () => {
+    if (!bindSonglistId || !roomid) return;
+    setIsBindingSonglist(true);
+    setSongManageError(null);
+    setSongManageSuccess(null);
+    try {
+      // 先获取歌单详情，获取其中的歌曲ID列表
+      const songlistDetail = await getSonglistDetail(bindSonglistId);
+      if (!songlistDetail.songs || songlistDetail.songs.length === 0) {
+        setSongManageError("该歌单中没有歌曲");
+        return;
+      }
+      const songIds = songlistDetail.songs.map((song) => song.id);
+      // 使用room_songs API添加所有歌曲
+      await addSongsToRoom(roomid, {
+        song_ids: songIds,
+        append_to_end: true,
+      });
+      setSongManageSuccess(
+        `歌单 "${songlistDetail.title || "未命名歌单"}" 已绑定到房间，添加了 ${songIds.length} 首歌曲`,
+      );
+      setBindSonglistId(null);
+      // 重新加载房间歌曲列表
+      setRoomSongsPage(1);
+      await loadRoomSongs(1);
+    } catch (err) {
+      setSongManageError((err as Error).message || "绑定歌单到房间失败");
+    } finally {
+      setIsBindingSonglist(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-base-200 flex items-center justify-center">
@@ -600,6 +1078,12 @@ const RoomManagePage = () => {
           <h1 className="text-xl font-bold">猜猜歌 · 房间管理</h1>
         </div>
         <div className="navbar-end gap-2">
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={handleOpenSongManageDialog}
+          >
+            管理歌曲 / 歌单
+          </button>
           <button
             className="btn btn-outline btn-sm"
             onClick={handleOpenManageDialog}
@@ -658,6 +1142,206 @@ const RoomManagePage = () => {
                       <span>还没有可选 TagGroup，请先在弹窗里创建。</span>
                     </div>
                   ) : null}
+                </div>
+              </div>
+
+              {/* 房间歌曲管理 */}
+              <div className="mt-6">
+                <h3 className="text-sm font-semibold mb-2">房间歌曲管理</h3>
+                <p className="text-sm opacity-70 mb-3">
+                  管理当前房间的歌曲队列。可以从歌单绑定歌曲，或添加/删除单曲。
+                </p>
+
+                {roomSongsError && (
+                  <div className="alert alert-soft alert-error mb-3">
+                    <span>{roomSongsError}</span>
+                  </div>
+                )}
+                {roomSongsSuccess && (
+                  <div className="alert alert-soft alert-success mb-3">
+                    <span>{roomSongsSuccess}</span>
+                  </div>
+                )}
+
+                <div className="card bg-base-200">
+                  <div className="card-body p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="card-title text-lg">
+                        当前房间歌曲
+                        <span className="badge badge-ghost badge-sm ml-2">
+                          {roomSongsTotal} 首
+                        </span>
+                      </h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs opacity-70">
+                          第 {roomSongsPage} / {roomSongsTotalPages} 页
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-outline"
+                          onClick={handleSelectAllRoomSongs}
+                          disabled={roomSongs.length === 0}
+                        >
+                          {selectedRoomSongIds.length === roomSongs.length &&
+                          roomSongs.length > 0
+                            ? "取消全选"
+                            : "全选"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-error btn-outline"
+                          onClick={() =>
+                            handleRemoveSongsFromRoom(selectedRoomSongIds)
+                          }
+                          disabled={selectedRoomSongIds.length === 0}
+                        >
+                          删除选中 ({selectedRoomSongIds.length})
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-warning btn-outline"
+                          onClick={handleOpenClearRoomSongsConfirm}
+                          disabled={roomSongs.length === 0}
+                        >
+                          清空全部
+                        </button>
+                      </div>
+                    </div>
+
+                    {isLoadingRoomSongs ? (
+                      <div className="py-8 text-center">
+                        <span className="loading loading-spinner loading-md" />
+                        <p className="mt-2 text-sm opacity-70">
+                          加载房间歌曲中...
+                        </p>
+                      </div>
+                    ) : roomSongs.length === 0 ? (
+                      <div className="py-8 text-center">
+                        <p className="text-base-content/70">房间中暂无歌曲</p>
+                        <p className="text-sm opacity-70 mt-1">
+                          可以点击下方按钮从歌单绑定歌曲，或在下方歌曲管理对话框中添加单曲
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="table table-zebra table-sm">
+                            <thead>
+                              <tr>
+                                <th className="w-10">
+                                  <input
+                                    type="checkbox"
+                                    className="checkbox checkbox-xs"
+                                    checked={
+                                      selectedRoomSongIds.length ===
+                                        roomSongs.length && roomSongs.length > 0
+                                    }
+                                    onChange={handleSelectAllRoomSongs}
+                                    disabled={roomSongs.length === 0}
+                                  />
+                                </th>
+                                <th>歌曲</th>
+                                <th>歌手</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {roomSongs?.map((roomSong) => (
+                                <tr
+                                  key={`${roomSong.room_id}-${roomSong.song_id}`}
+                                >
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      className="checkbox checkbox-xs"
+                                      checked={selectedRoomSongIds.includes(
+                                        roomSong.song_id,
+                                      )}
+                                      onChange={() =>
+                                        toggleRoomSongSelection(
+                                          roomSong.song_id,
+                                        )
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <div className="font-medium">
+                                      {roomSong.song?.title || "-"}
+                                    </div>
+                                    {roomSong.song?.subtitle && (
+                                      <div className="text-xs opacity-70">
+                                        {roomSong.song?.subtitle}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td>{roomSong.song?.artist || "-"}</td>
+                                  <td className="flex justify-end-safe">
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-error btn-outline"
+                                      onClick={() =>
+                                        handleRemoveSongsFromRoom([
+                                          roomSong.song_id,
+                                        ])
+                                      }
+                                    >
+                                      移除
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="mt-3 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-xs"
+                            onClick={() =>
+                              void handleRoomSongsPageChange(roomSongsPage - 1)
+                            }
+                            disabled={!roomSongsHasPrev}
+                          >
+                            上一页
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-xs"
+                            onClick={() =>
+                              void handleRoomSongsPageChange(roomSongsPage + 1)
+                            }
+                            disabled={!roomSongsHasNext}
+                          >
+                            下一页
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      setSongManageTab("songlists");
+                      void handleOpenSongManageDialog();
+                    }}
+                  >
+                    <Icon icon="mdi:playlist-music" className="text-lg" />
+                    从歌单绑定歌曲
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => {
+                      setSongManageTab("songs");
+                      void handleOpenSongManageDialog();
+                    }}
+                  >
+                    <Icon icon="mdi:music" className="text-lg" />
+                    添加单曲到房间
+                  </button>
                 </div>
               </div>
 
@@ -1138,6 +1822,567 @@ const RoomManagePage = () => {
         </form>
       </dialog>
 
+      {/* 歌曲管理对话框 */}
+      <dialog ref={songManageDialogRef} className="modal">
+        <div className="modal-box w-11/12 max-w-6xl">
+          <h3 className="text-xl font-bold">歌曲与歌单管理</h3>
+          <p className="text-sm opacity-70 mt-1">
+            管理全局歌曲和歌单；可将歌单或单曲绑定到当前房间的播放队列。
+          </p>
+
+          {isSongManageLoading ? (
+            <div className="py-10 text-center">
+              <span className="loading loading-spinner loading-lg" />
+            </div>
+          ) : (
+            <>
+              <div className="tabs tabs-boxed mt-4">
+                <button
+                  className={`tab ${songManageTab === "songs" ? "tab-active" : ""}`}
+                  onClick={() => setSongManageTab("songs")}
+                >
+                  歌曲管理
+                </button>
+                <button
+                  className={`tab ${songManageTab === "songlists" ? "tab-active" : ""}`}
+                  onClick={() => setSongManageTab("songlists")}
+                >
+                  歌单管理
+                </button>
+              </div>
+
+              {songManageTab === "songs" ? (
+                <div className="mt-4">
+                  <section className="card bg-base-200 mb-4">
+                    <div className="card-body gap-3">
+                      <h4 className="card-title text-lg">创建歌曲</h4>
+                      <label className="floating-label">
+                        <input
+                          className="input input-bordered w-full"
+                          value={newSong.title || ""}
+                          onChange={(e) =>
+                            setNewSong({ ...newSong, title: e.target.value })
+                          }
+                          placeholder="歌曲标题"
+                        />
+                        <span>歌曲标题 *</span>
+                      </label>
+                      <label className="floating-label">
+                        <input
+                          className="input input-bordered w-full"
+                          value={newSong.artist || ""}
+                          onChange={(e) =>
+                            setNewSong({ ...newSong, artist: e.target.value })
+                          }
+                          placeholder="歌手"
+                        />
+                        <span>歌手</span>
+                      </label>
+                      <label className="floating-label">
+                        <input
+                          className="input input-bordered w-full"
+                          value={newSong.platform_song_id || ""}
+                          onChange={(e) =>
+                            setNewSong({
+                              ...newSong,
+                              platform_song_id: e.target.value,
+                            })
+                          }
+                          placeholder="平台歌曲ID"
+                        />
+                        <span>平台歌曲ID</span>
+                      </label>
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleCreateSong}
+                        disabled={isCreatingSong}
+                      >
+                        {isCreatingSong ? "创建中..." : "创建歌曲"}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="card bg-base-200">
+                    <div className="card-body">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="card-title text-lg">已有歌曲</h4>
+                        <span className="text-xs opacity-70">
+                          第 {songPage} / {songTotalPages} 页
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="table table-zebra table-sm">
+                          <thead>
+                            <tr>
+                              <th>ID</th>
+                              <th>标题</th>
+                              <th>歌手</th>
+                              <th>平台</th>
+                              <th>操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {songs.map((song) => (
+                              <tr key={song.id}>
+                                <td>{song.id}</td>
+                                <td>{song.title || "-"}</td>
+                                <td>{song.artist || "-"}</td>
+                                <td>{song.platform || "-"}</td>
+                                <td>
+                                  <div className="flex gap-1">
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-outline"
+                                      onClick={() => handleStartEditSong(song)}
+                                    >
+                                      编辑
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-error btn-outline"
+                                      onClick={() => handleDeleteSong(song.id)}
+                                      disabled={pendingDeleteSongId === song.id}
+                                    >
+                                      {pendingDeleteSongId === song.id
+                                        ? "删除中..."
+                                        : "删除"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-success btn-outline"
+                                      onClick={() =>
+                                        setAddSingleSongId(song.id)
+                                      }
+                                    >
+                                      添加到房间
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={() =>
+                            void handleSongPageChange(songPage - 1)
+                          }
+                          disabled={!songHasPrev}
+                        >
+                          上一页
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={() =>
+                            void handleSongPageChange(songPage + 1)
+                          }
+                          disabled={!songHasNext}
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
+                  {editingSongId && (
+                    <div className="modal modal-open">
+                      <div className="modal-box">
+                        <h3 className="font-bold text-lg">编辑歌曲</h3>
+                        <label className="floating-label mt-4">
+                          <input
+                            className="input input-bordered w-full"
+                            value={editingSongData.title || ""}
+                            onChange={(e) =>
+                              setEditingSongData({
+                                ...editingSongData,
+                                title: e.target.value,
+                              })
+                            }
+                            placeholder="歌曲标题"
+                          />
+                          <span>歌曲标题 *</span>
+                        </label>
+                        <label className="floating-label mt-2">
+                          <input
+                            className="input input-bordered w-full"
+                            value={editingSongData.artist || ""}
+                            onChange={(e) =>
+                              setEditingSongData({
+                                ...editingSongData,
+                                artist: e.target.value,
+                              })
+                            }
+                            placeholder="歌手"
+                          />
+                          <span>歌手</span>
+                        </label>
+                        <div className="modal-action">
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={handleCancelEditSong}
+                            disabled={isUpdatingSong}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={handleSaveEditSong}
+                            disabled={isUpdatingSong}
+                          >
+                            {isUpdatingSong ? "保存中..." : "保存"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 添加单曲到房间 */}
+                  {addSingleSongId && (
+                    <div className="modal modal-open">
+                      <div className="modal-box">
+                        <h3 className="font-bold text-lg">
+                          添加单曲到房间队列
+                        </h3>
+                        <p className="py-3">
+                          确认将这首歌曲添加到当前房间的播放队列吗？
+                        </p>
+                        <div className="modal-action">
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setAddSingleSongId(null)}
+                            disabled={isAddingSingleSong}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={handleAddSingleSongToRoom}
+                            disabled={isAddingSingleSong}
+                          >
+                            {isAddingSingleSong ? "添加中..." : "确认添加"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <section className="card bg-base-200 mb-4">
+                    <div className="card-body gap-3">
+                      <h4 className="card-title text-lg">从平台导入歌单</h4>
+                      <label className="floating-label">
+                        <select
+                          className="select select-bordered w-full"
+                          value={newSonglistPlatform}
+                          onChange={(e) =>
+                            setNewSonglistPlatform(e.target.value)
+                          }
+                        >
+                          <option value="qq">QQ音乐</option>
+                          <option value="netease">网易云音乐</option>
+                        </select>
+                        <span>平台</span>
+                      </label>
+                      <label className="floating-label">
+                        <input
+                          className="input input-bordered w-full"
+                          value={newSonglistPlatformId}
+                          onChange={(e) =>
+                            setNewSonglistPlatformId(e.target.value)
+                          }
+                          placeholder="歌单ID（例如：9561074811）"
+                        />
+                        <span>歌单ID *</span>
+                      </label>
+                      <label className="floating-label">
+                        <input
+                          className="input input-bordered w-full"
+                          value={newSonglistCookie}
+                          onChange={(e) => setNewSonglistCookie(e.target.value)}
+                          placeholder="Cookie（可选，用于需要登录的歌单）"
+                        />
+                        <span>Cookie（可选）</span>
+                      </label>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleCreateSonglist}
+                        disabled={isCreatingSonglist}
+                      >
+                        {isCreatingSonglist ? "导入中..." : "导入歌单"}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section className="card bg-base-200">
+                    <div className="card-body">
+                      <div className="flex items-center justify-between gap-2">
+                        <h4 className="card-title text-lg">已有歌单</h4>
+                        <span className="text-xs opacity-70">
+                          第 {songlistPage} / {songlistTotalPages} 页
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="table table-zebra table-sm">
+                          <thead>
+                            <tr>
+                              <th>ID</th>
+                              <th>标题</th>
+                              <th>平台</th>
+                              <th>歌曲数</th>
+                              <th>操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {songlists.map((songlist) => (
+                              <tr key={songlist.id}>
+                                <td>{songlist.id}</td>
+                                <td>{songlist.title || "-"}</td>
+                                <td>{songlist.platform || "-"}</td>
+                                <td>{songlist.count}</td>
+                                <td>
+                                  <div className="flex gap-1">
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-outline"
+                                      onClick={() =>
+                                        setBindSonglistId(songlist.id)
+                                      }
+                                    >
+                                      绑定到房间
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn btn-xs btn-error btn-outline"
+                                      onClick={() =>
+                                        handleDeleteSonglist(songlist.id)
+                                      }
+                                      disabled={
+                                        pendingDeleteSonglistId === songlist.id
+                                      }
+                                    >
+                                      {pendingDeleteSonglistId === songlist.id
+                                        ? "删除中..."
+                                        : "删除"}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="mt-3 flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={() =>
+                            void handleSonglistPageChange(songlistPage - 1)
+                          }
+                          disabled={!songlistHasPrev}
+                        >
+                          上一页
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs"
+                          onClick={() =>
+                            void handleSonglistPageChange(songlistPage + 1)
+                          }
+                          disabled={!songlistHasNext}
+                        >
+                          下一页
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* 绑定歌单到房间 */}
+                  {bindSonglistId && (
+                    <div className="modal modal-open">
+                      <div className="modal-box">
+                        <h3 className="font-bold text-lg">
+                          绑定歌单到房间队列
+                        </h3>
+                        <p className="py-3">
+                          确认将这个歌单的所有歌曲添加到当前房间的播放队列吗？
+                        </p>
+                        <div className="modal-action">
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setBindSonglistId(null)}
+                            disabled={isBindingSonglist}
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            onClick={handleBindSonglistToRoom}
+                            disabled={isBindingSonglist}
+                          >
+                            {isBindingSonglist ? "绑定中..." : "确认绑定"}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {songManageError && (
+                <div className="alert alert-soft alert-error mt-4">
+                  <span>{songManageError}</span>
+                </div>
+              )}
+              {songManageSuccess && (
+                <div className="alert alert-soft alert-success mt-4">
+                  <span>{songManageSuccess}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => {}}>close</button>
+        </form>
+      </dialog>
+
+      {/* 删除歌曲确认对话框 */}
+      <dialog ref={deleteSongConfirmDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认删除歌曲</h3>
+          <p className="py-3 text-sm">
+            确认删除这首歌曲吗？
+            {confirmDeleteSongId && (
+              <span className="font-semibold ml-1">
+                「
+                {songs.find((s) => s.id === confirmDeleteSongId)?.title ||
+                  `ID: ${confirmDeleteSongId}`}
+                」
+              </span>
+            )}
+            <br />
+            此操作不可撤销。
+          </p>
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                deleteSongConfirmDialogRef.current?.close();
+                setConfirmDeleteSongId(null);
+              }}
+              disabled={pendingDeleteSongId !== null}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={handleConfirmDeleteSong}
+              disabled={pendingDeleteSongId !== null}
+            >
+              {pendingDeleteSongId !== null ? "删除中..." : "确认删除"}
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setConfirmDeleteSongId(null)}>close</button>
+        </form>
+      </dialog>
+
+      {/* 删除歌单确认对话框 */}
+      <dialog ref={deleteSonglistConfirmDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认删除歌单</h3>
+          <p className="py-3 text-sm">
+            确认删除这个歌单吗？
+            {confirmDeleteSonglistId && (
+              <span className="font-semibold ml-1">
+                「
+                {songlists.find((s) => s.id === confirmDeleteSonglistId)
+                  ?.title || `ID: ${confirmDeleteSonglistId}`}
+                」
+              </span>
+            )}
+            <br />
+            此操作不可撤销。
+          </p>
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                deleteSonglistConfirmDialogRef.current?.close();
+                setConfirmDeleteSonglistId(null);
+              }}
+              disabled={pendingDeleteSonglistId !== null}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={handleConfirmDeleteSonglist}
+              disabled={pendingDeleteSonglistId !== null}
+            >
+              {pendingDeleteSonglistId !== null ? "删除中..." : "确认删除"}
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setConfirmDeleteSonglistId(null)}>
+            close
+          </button>
+        </form>
+      </dialog>
+
+      {/* 清空房间歌曲确认对话框 */}
+      <dialog ref={clearRoomSongsConfirmDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认清空房间歌曲</h3>
+          <p className="py-3 text-sm">
+            确认清空房间所有歌曲吗？
+            <br />
+            此操作不可撤销，将移除房间中的所有歌曲。
+          </p>
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                clearRoomSongsConfirmDialogRef.current?.close();
+                setShowClearRoomSongsConfirm(false);
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={handleClearRoomSongs}
+            >
+              确认清空
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setShowClearRoomSongsConfirm(false)}>
+            close
+          </button>
+        </form>
+      </dialog>
+
       {(manageError || manageSuccess) && (
         <div className="toast toast-top toast-center z-50">
           {manageError ? (
@@ -1148,6 +2393,20 @@ const RoomManagePage = () => {
           {manageSuccess ? (
             <div className="alert alert-soft alert-success">
               <span>{manageSuccess}</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+      {(songManageError || songManageSuccess) && (
+        <div className="toast toast-top toast-center z-50">
+          {songManageError ? (
+            <div className="alert alert-soft alert-error">
+              <span>{songManageError}</span>
+            </div>
+          ) : null}
+          {songManageSuccess ? (
+            <div className="alert alert-soft alert-success">
+              <span>{songManageSuccess}</span>
             </div>
           ) : null}
         </div>

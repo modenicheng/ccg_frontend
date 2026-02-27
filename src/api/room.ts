@@ -1,4 +1,4 @@
-import { http } from "./http.ts";
+import { http } from "./http";
 
 export interface CreateRoomRequest {
   title: string;
