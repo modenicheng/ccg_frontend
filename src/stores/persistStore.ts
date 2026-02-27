@@ -12,7 +12,10 @@ const usePersistStore = create<PersistState>()(
       setVolume: (volume: number) => set({ volume }),
       addUser: (user) =>
         set((state) => ({
-          users: [...state.users, user],
+          users: [
+            ...state.users.filter((u) => u.roomId !== user.roomId),
+            user,
+          ],
         })),
       removeUser: (userId) =>
         set((state) => ({

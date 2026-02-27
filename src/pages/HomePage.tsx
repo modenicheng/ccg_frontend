@@ -42,6 +42,12 @@ function HomePage() {
       cookieStore.set(`ccg-room-token:${room.roomId}`, room.host.token);
       cookieStore.set(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
       cookieStore.set(`ccg-room-username:${room.roomId}`, room.host.username);
+      sessionStorage.setItem(`ccg-room-token:${room.roomId}`, room.host.token);
+      sessionStorage.setItem(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
+      sessionStorage.setItem(
+        `ccg-room-username:${room.roomId}`,
+        room.host.username,
+      );
       persistStore.addUser({
         ...room.host,
         roomId: room.roomId,
@@ -78,6 +84,19 @@ function HomePage() {
         `ccg-room-username:${result.roomId}`,
         result.user.username,
       );
+      sessionStorage.setItem(`ccg-room-token:${result.roomId}`, result.user.token);
+      sessionStorage.setItem(
+        `ccg-room-user-id:${result.roomId}`,
+        `${result.user.id}`,
+      );
+      sessionStorage.setItem(
+        `ccg-room-username:${result.roomId}`,
+        result.user.username,
+      );
+      persistStore.addUser({
+        ...result.user,
+        roomId: result.roomId,
+      });
       navigate(`/room/${result.roomId}`);
     } catch (e) {
       setError((e as Error).message || "加入房间失败");

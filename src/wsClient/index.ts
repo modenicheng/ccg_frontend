@@ -191,7 +191,7 @@ class WS {
     }
   }
 
-  async sendJson(message: any) {
+  async sendJson(message: object) {
     const jsonString = JSON.stringify(message);
     await this.send(jsonString);
   }

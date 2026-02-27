@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { Icon } from "@iconify-icon/react";
 import { useNavigate } from "react-router-dom";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { WS } from "../wsClient";
 import { EventType, GameEventId } from "../types/eventTypes";
@@ -11,6 +11,7 @@ import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
 import type { RoomState } from "../types/store";
+import { UserBar } from "../components";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -33,6 +34,21 @@ const buildWsUrl = (roomId: string, token: string | null) => {
   url.pathname = `/ws/${encodedRoomId}`;
   url.search = token ? `token=${encodeURIComponent(token)}` : "";
   return url.toString();
+};
+
+const readCookie = (name: string): string | null => {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matched = document.cookie.match(
+    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
+  );
+  if (!matched) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(matched[1]);
+  } catch {
+    return matched[1];
+  }
 };
 
 type WsTag = {
@@ -94,6 +110,15 @@ type JudgingMessage = {
   };
 };
 
+type AttemptAnswerMessage = {
+  event: typeof GameEventId.ATTEMPT_ANSWER;
+  ts: number;
+  data: {
+    offset_ts: number;
+    user_id: number;
+  };
+};
+
 const isPlayControlData = (value: unknown): value is PlayControlData => {
   if (!value || typeof value !== "object") {
     return false;
@@ -134,15 +159,33 @@ function RoomPage() {
     getRoomUser,
   } = usePersistStore();
   const user = getRoomUser(roomId);
+  const fallbackUserIdFromSession = Number.parseInt(
+    sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "",
+    10,
+  );
+  const fallbackUserIdFromCookie = Number.parseInt(
+    readCookie(`ccg-room-user-id:${roomId}`) ?? "",
+    10,
+  );
+  const userId = user?.id
+    ?? (Number.isFinite(fallbackUserIdFromSession)
+      ? fallbackUserIdFromSession
+      : null)
+    ?? (Number.isFinite(fallbackUserIdFromCookie)
+      ? fallbackUserIdFromCookie
+      : null);
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
   const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
   const [roomOwner, setRoomOwner] = useState<string>("-");
   const [tagGroups, setTagGroups] = useState<WsTagGroup[]>([]);
+  const [onlinePlayers, setOnlinePlayers] = useState<WsPlayer[]>([]);
+  const [answerOrderByUserId, setAnswerOrderByUserId] = useState<
+    Record<number, number>
+  >({});
   const [selectedTagByGroup, setSelectedTagByGroup] = useState<
     Record<number, number | null>
   >({});
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isJudging, setIsJudging] = useState<boolean>(false);
   const [currentSong, setCurrentSong] = useState<{
     title: string;
@@ -174,13 +217,69 @@ function RoomPage() {
   const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
 
+  const addAttemptOrder = useCallback((userId: number) => {
+    setAnswerOrderByUserId((prev) => {
+      if (prev[userId]) {
+        return prev;
+      }
+      const nextOrder = Math.max(0, ...Object.values(prev)) + 1;
+      return {
+        ...prev,
+        [userId]: nextOrder,
+      };
+    });
+  }, []);
+
+  const sortedOnlinePlayers = useMemo(() => {
+    return [...onlinePlayers].sort((a, b) => {
+      const aOrder = answerOrderByUserId[a.id];
+      const bOrder = answerOrderByUserId[b.id];
+      const aHasOrder = typeof aOrder === "number";
+      const bHasOrder = typeof bOrder === "number";
+
+      if (aHasOrder && bHasOrder) {
+        return aOrder - bOrder;
+      }
+      if (aHasOrder) {
+        return -1;
+      }
+      if (bHasOrder) {
+        return 1;
+      }
+      return a.id - b.id;
+    });
+  }, [answerOrderByUserId, onlinePlayers]);
+
   const handleBuzz = useCallback(() => {
     if (!isConnected) {
+      console.debug("[buzz] skip: not connected");
       return;
     }
 
-    // TODO: 这里后续可接入真正的抢答消息发送逻辑
-  }, [isConnected]);
+    if (!wsRef.current?.isConnected()) {
+      console.debug("[buzz] skip: wsRef not connected");
+      return;
+    }
+
+    if (userId === null) {
+      console.debug("[buzz] skip: missing userId from persist/session/cookie");
+      return;
+    }
+
+    addAttemptOrder(userId);
+
+    const calibratedNow = Math.round(getCalibratedNow());
+    const payload: AttemptAnswerMessage = {
+      event: GameEventId.ATTEMPT_ANSWER,
+      ts: calibratedNow,
+      data: {
+        offset_ts: calibratedNow,
+        user_id: userId,
+      },
+    };
+
+    void wsRef.current.sendJson(payload);
+  }, [addAttemptOrder, getCalibratedNow, isConnected, userId]);
 
   const sendPlaybackControl = useCallback(
     async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
@@ -296,6 +395,8 @@ function RoomPage() {
 
         gameStore.getState().setRoomState(nextRoomState);
         setRoomOwner(payload.owner ?? payload.host ?? "-");
+        setOnlinePlayers(payload.players);
+        setAnswerOrderByUserId({});
 
         setTagGroups(payload.tag_groups);
         setSelectedTagByGroup(
@@ -318,20 +419,30 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
+        setAnswerOrderByUserId({});
         applyRemoteProgress(message, true);
         await audioRef.current?.resume();
-        setIsPlaying(true);
         setIsJudging(false);
         // 播放时隐藏曲目信息
         setCurrentSong(null);
       },
     );
 
+    wsRef.current.onJsonEvent<AttemptAnswerMessage>(
+      GameEventId.ATTEMPT_ANSWER,
+      (message) => {
+        const attemptedUserId = message?.data?.user_id;
+        if (typeof attemptedUserId !== "number") {
+          return;
+        }
+        addAttemptOrder(attemptedUserId);
+      },
+    );
+
     wsRef.current.onJsonEvent<JudgingMessage>(
       GameEventId.JUDGING,
       (message) => {
-        setIsPlaying(false);
-        setIsJudging(true);
+          setIsJudging(true);
         // 判分时显示完整曲目信息
         if (message.data?.song) {
           setCurrentSong({
@@ -343,18 +454,21 @@ function RoomPage() {
         }
       },
     );
-    
-    wsRef.current.onJsonEvent(
-      GameEventId.SCORE_UPDATE,
-      (message) => {
-        // 处理得分更新
-        if (message.data?.scores) {
-          // 更新游戏状态中的得分信息
-          console.log('Score updated:', message.data.scores);
-          gameStore.getState().setScores(message.data.scores);
-        }
-      },
-    );
+
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.SCORE_UPDATE;
+      ts: number;
+      data: {
+        scores: Array<{ player_id: number; username: string; score: number }>;
+      };
+    }>(GameEventId.SCORE_UPDATE, (message) => {
+      // 处理得分更新
+      if (message.data?.scores) {
+        // 更新游戏状态中的得分信息
+        console.log("Score updated:", message.data.scores);
+        gameStore.getState().setScores(message.data.scores);
+      }
+    });
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
@@ -377,6 +491,7 @@ function RoomPage() {
       setRoomId(null);
     };
   }, [
+    addAttemptOrder,
     applyRemoteProgress,
     roomId,
     setConnected,
@@ -854,7 +969,7 @@ function RoomPage() {
         </div>
         <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
           <div className="card-body p-2">
-            <ul className="list">
+            <ul className="list gap-2">
               <li className="list-row">
                 <h2 className="font-semibold flex items-center text-lg">
                   <Icon
@@ -866,6 +981,27 @@ function RoomPage() {
                   在线玩家
                 </h2>
               </li>
+              {sortedOnlinePlayers.length > 0 ? (
+                sortedOnlinePlayers.map((player) => {
+                  const order = answerOrderByUserId[player.id];
+                  return (
+                    <li
+                      key={player.id}
+                      className={clsx("px-2 transition-all duration-300", {
+                        "buzz-ordered-item": typeof order === "number",
+                      })}
+                    >
+                      <UserBar
+                        username={player.username}
+                        order={order}
+                        activate={typeof order === "number"}
+                      />
+                    </li>
+                  );
+                })
+              ) : (
+                <li className="list-row px-2 text-sm opacity-60">暂无在线玩家</li>
+              )}
             </ul>
           </div>
         </div>
@@ -883,8 +1019,9 @@ function RoomPage() {
             </thead>
             <tbody>
               {gameStore.getState().scores.length > 0 ? (
-                gameStore.getState().scores
-                  .sort((a, b) => b.score - a.score)
+                gameStore
+                  .getState()
+                  .scores.sort((a, b) => b.score - a.score)
                   .map((player, index) => (
                     <tr key={player.player_id} className="">
                       <th className="text-end">{index + 1}</th>
