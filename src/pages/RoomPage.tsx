@@ -16,6 +16,7 @@ const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 40;
 const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
+const CANVAS_INIT_DELAY_MS = 800;
 
 let domProgressPercent = 0;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
@@ -80,6 +81,18 @@ type PlayControlMessage = {
   data: PlayControlData;
 };
 
+const isPlayControlData = (value: unknown): value is PlayControlData => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<PlayControlData>;
+  return (
+    typeof candidate.progress_ms === "number" &&
+    typeof candidate.offset_ts === "number"
+  );
+};
+
 const mapStatus = (status: number): RoomState["status"] => {
   if (status === 1) return "playing";
   if (status === 2) return "ended";
@@ -131,6 +144,8 @@ function RoomPage() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
+  const canvasInitializedRef = useRef(false);
+  const canvasInitTimerRef = useRef<number | null>(null);
 
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
 
@@ -163,12 +178,13 @@ function RoomPage() {
       }
 
       const progressMs = audioRef.current.currentTimeMs;
+      const calibratedNow = Math.round(getCalibratedNow());
       const payload: PlayControlMessage = {
         event,
-        ts: getCalibratedNow(),
+        ts: calibratedNow,
         data: {
           progress_ms: progressMs,
-          offset_ts: getCalibratedNow(),
+          offset_ts: calibratedNow,
           audio_url: SYNC_AUDIO_URL,
         },
       };
@@ -190,17 +206,23 @@ function RoomPage() {
         return;
       }
 
+      if (!isPlayControlData(message?.data)) {
+        return;
+      }
+
+      const controlData = message.data;
+
       if (isProgressDraggingRef.current) {
         return;
       }
 
-      if (message.data.audio_url && message.data.audio_url !== SYNC_AUDIO_URL) {
+      if (controlData.audio_url && controlData.audio_url !== SYNC_AUDIO_URL) {
         return;
       }
 
       const now = getCalibratedNow();
-      const elapsed = Math.max(0, now - message.data.offset_ts);
-      const expectedMs = Math.max(0, message.data.progress_ms + elapsed);
+      const elapsed = Math.max(0, now - controlData.offset_ts);
+      const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
       const localMs = audioRef.current.currentTimeMs;
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
@@ -316,9 +338,6 @@ function RoomPage() {
       setAudioState(nextState);
     };
     setAudioState(audioRef.current.state);
-    if (canvasRef.current && canvasParentRef.current) {
-      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
-    }
     audioRef.current.onTimeUpdate = (ev) => {
       if (progressBarRef.current && !isProgressDraggingRef.current) {
         const audioElement = ev.target as HTMLAudioElement;
@@ -332,16 +351,47 @@ function RoomPage() {
     audioRef.current.preload(SYNC_AUDIO_URL);
     audioRef.current.playUrlAsStream(SYNC_AUDIO_URL, false);
     return () => {
+      if (canvasInitTimerRef.current !== null) {
+        window.clearTimeout(canvasInitTimerRef.current);
+        canvasInitTimerRef.current = null;
+      }
+      canvasInitializedRef.current = false;
       audioRef.current?.cleanup();
       audioRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (audioRef.current && canvasRef.current && canvasParentRef.current) {
-      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
+    if (!roomId || !isConnected || latencyAvg === null) {
+      return;
     }
-  }, [roomId]);
+
+    if (canvasInitializedRef.current || canvasInitTimerRef.current !== null) {
+      return;
+    }
+
+    canvasInitTimerRef.current = window.setTimeout(() => {
+      canvasInitTimerRef.current = null;
+      if (
+        canvasInitializedRef.current ||
+        !audioRef.current ||
+        !canvasRef.current ||
+        !canvasParentRef.current
+      ) {
+        return;
+      }
+
+      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
+      canvasInitializedRef.current = true;
+    }, CANVAS_INIT_DELAY_MS);
+
+    return () => {
+      if (canvasInitTimerRef.current !== null) {
+        window.clearTimeout(canvasInitTimerRef.current);
+        canvasInitTimerRef.current = null;
+      }
+    };
+  }, [isConnected, latencyAvg, roomId]);
 
   useEffect(() => {
     if (audioRef.current) {

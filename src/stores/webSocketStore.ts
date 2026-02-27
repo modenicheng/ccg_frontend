@@ -104,12 +104,9 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
    * calibrated_now = Date.now() + average_clockOffset
    */
   getCalibratedNow: () => {
-    const { clockOffsetHistory } = get();
-    if (clockOffsetHistory.length === 0) return Date.now();
-    const avgOffset = Math.round(
-      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length,
-    );
-    return Date.now() + avgOffset;
+    const { clockOffsetAvg } = get();
+    if (clockOffsetAvg === null) return Date.now();
+    return Date.now() + clockOffsetAvg;
   },
 
   /**
@@ -117,12 +114,9 @@ const useWebSocketStore = create<WebSocketState>((set, get) => ({
    * calibrated_timestamp = timestamp + average_clockOffset
    */
   calibrateTimestamp: (timestamp: number) => {
-    const { clockOffsetHistory } = get();
-    if (clockOffsetHistory.length === 0) return timestamp;
-    const avgOffset = Math.round(
-      clockOffsetHistory.reduce((a, b) => a + b, 0) / clockOffsetHistory.length,
-    );
-    return timestamp + avgOffset;
+    const { clockOffsetAvg } = get();
+    if (clockOffsetAvg === null) return timestamp;
+    return timestamp + clockOffsetAvg;
   },
 }));
 
