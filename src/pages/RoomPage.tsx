@@ -192,7 +192,16 @@ function RoomPage() {
     artist: string;
     album: string;
     coverUrl: string;
+    platformUrl?: string;
   } | null>(null);
+  const [judgingDialogOpen, setJudgingDialogOpen] = useState<boolean>(false);
+  const [skipConfirmDialogOpen, setSkipConfirmDialogOpen] = useState<boolean>(false);
+  const [confirmAnswerDialogOpen, setConfirmAnswerDialogOpen] = useState<boolean>(false);
+  const [selectedTags, setSelectedTags] = useState<Record<number, number | null>>({});
+  const [selectedDescriptions, setSelectedDescriptions] = useState<number[]>([]);
+  const [historyTagIds, setHistoryTagIds] = useState<number[]>([]);
+  const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
+  const [playerDescriptions, setPlayerDescriptions] = useState<Array<{ id: number; username: string; description: string }>>([]);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -315,10 +324,75 @@ function RoomPage() {
   );
 
   const handleTogglePlayPause = useCallback(() => {
-    const nextEvent =
+    const nextEvent = 
       audioState === "running" ? GameEventId.PAUSE : GameEventId.PLAY;
     void sendPlaybackControl(nextEvent);
   }, [audioState, sendPlaybackControl]);
+
+  const handleJudgeSubmit = useCallback(() => {
+    if (!wsRef.current?.isConnected() || !user?.isOwner) {
+      return;
+    }
+
+    // 收集选中的标签ID
+    const correctTags = Object.values(selectedTags).filter((tagId): tagId is number => tagId !== null);
+    
+    // 收集选中的描述ID
+    const correctDescriptionIds = selectedDescriptions;
+    
+    const payload = {
+      event: GameEventId.JUDGE_SUBMIT,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        correct_tags: correctTags,
+        correct_description_ids: correctDescriptionIds,
+        new_correct_descriptions: [],
+        skip_scoring: false
+      }
+    };
+
+    void wsRef.current.sendJson(payload);
+    setJudgingDialogOpen(false);
+    setConfirmAnswerDialogOpen(false);
+  }, [selectedTags, selectedDescriptions, getCalibratedNow, user?.isOwner]);
+
+  const handleJudgeSkip = useCallback(() => {
+    if (!wsRef.current?.isConnected() || !user?.isOwner) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.JUDGE_SUBMIT,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        correct_tags: [],
+        correct_description_ids: [],
+        new_correct_descriptions: [],
+        skip_scoring: true
+      }
+    };
+
+    void wsRef.current.sendJson(payload);
+    setJudgingDialogOpen(false);
+    setSkipConfirmDialogOpen(false);
+  }, [getCalibratedNow, user?.isOwner]);
+
+  const handleSelectJudgingTag = (groupId: number, tagId: number) => {
+    setSelectedTags((prev) => ({
+      ...prev,
+      [groupId]: tagId
+    }));
+  };
+
+  const handleToggleDescription = (descriptionId: number) => {
+    setSelectedDescriptions((prev) => {
+      if (prev.includes(descriptionId)) {
+        return prev.filter(id => id !== descriptionId);
+      } else {
+        return [...prev, descriptionId];
+      }
+    });
+  };
 
   const applyRemoteProgress = useCallback(
     (message: PlayControlMessage, force = false) => {
@@ -439,21 +513,70 @@ function RoomPage() {
       },
     );
 
-    wsRef.current.onJsonEvent<JudgingMessage>(
-      GameEventId.JUDGING,
-      (message) => {
-          setIsJudging(true);
-        // 判分时显示完整曲目信息
-        if (message.data?.song) {
-          setCurrentSong({
-            title: message.data.song.title || "",
-            artist: message.data.song.artist || "",
-            album: message.data.song.album || "",
-            coverUrl: message.data.song.cover_url || "",
-          });
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.JUDGING;
+      ts: number;
+      data: {
+        song?: {
+          title?: string;
+          artist?: string;
+          album?: string;
+          cover_url?: string;
+          platform_url?: string;
+        };
+        history_tag_ids?: number[];
+        reference_descriptions?: string[];
+        player_descriptions?: Array<{
+          id: number;
+          username: string;
+          description: string;
+        }>;
+      };
+    }>(GameEventId.JUDGING, (message) => {
+      setIsJudging(true);
+      // 判分时显示完整曲目信息
+      if (message.data?.song) {
+        setCurrentSong({
+          title: message.data.song.title || "",
+          artist: message.data.song.artist || "",
+          album: message.data.song.album || "",
+          coverUrl: message.data.song.cover_url || "",
+          platformUrl: message.data.song.platform_url || undefined,
+        });
+      }
+      
+      // 存储历史标签ID
+      setHistoryTagIds(message.data?.history_tag_ids || []);
+      
+      // 存储参考精确描述
+      setReferenceDescriptions(message.data?.reference_descriptions || []);
+      
+      // 存储玩家精确描述
+      setPlayerDescriptions(message.data?.player_descriptions || []);
+      
+      // 初始化选中的标签
+      const initialSelectedTags: Record<number, number | null> = {};
+      tagGroups.forEach(group => {
+        // 检查是否有且仅有一个标签在历史标签中
+        const groupTagsInHistory = group.tags.filter(tag => 
+          message.data?.history_tag_ids?.includes(tag.id)
+        );
+        if (groupTagsInHistory.length === 1) {
+          initialSelectedTags[group.id] = groupTagsInHistory[0].id;
+        } else {
+          initialSelectedTags[group.id] = null;
         }
-      },
-    );
+      });
+      setSelectedTags(initialSelectedTags);
+      
+      // 重置选中的描述
+      setSelectedDescriptions([]);
+      
+      // 如果是房主，显示确认答案弹窗
+      if (user?.isOwner) {
+        setJudgingDialogOpen(true);
+      }
+    });
 
     wsRef.current.onJsonEvent<{
       event: typeof GameEventId.SCORE_UPDATE;
@@ -1104,6 +1227,255 @@ function RoomPage() {
         </div>
         <form method="dialog" className="modal-backdrop">
           <button>close</button>
+        </form>
+      </dialog>
+
+      {/* 房主确认正确答案弹窗 */}
+      <dialog
+        open={judgingDialogOpen}
+        className="modal modal-open"
+        onClose={() => setJudgingDialogOpen(false)}
+      >
+        <div className="modal-box w-11/12 max-w-4xl">
+          <h2 className="font-bold text-2xl">确认正确答案</h2>
+          
+          {/* 曲目信息 */}
+          {currentSong && (
+            <div 
+              className="card bg-base-200 mb-4 cursor-pointer"
+              onClick={() => {
+                if (currentSong.platformUrl) {
+                  window.open(currentSong.platformUrl, '_blank');
+                }
+              }}
+            >
+              <div className="card-body">
+                <div className="flex flex-row gap-4">
+                  <figure>
+                    <img
+                      className="h-32 rounded-md"
+                      src={currentSong.coverUrl || "https://via.placeholder.com/128x128/cccccc/666666?text=?"}
+                      alt=""
+                    />
+                  </figure>
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
+                    <h4 className="text-lg">{currentSong.album}</h4>
+                    <div className="text-md mt-4 opacity-70">{currentSong.artist}</div>
+                    {currentSong.platformUrl && (
+                      <div className="text-sm text-blue-500 mt-2">
+                        点击查看曲目详情
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          
+          {/* TagGroup选择 */}
+          <div className="mb-4">
+            <h3 className="text-lg font-semibold mb-3">选择正确标签</h3>
+            <div className="space-y-4">
+              {tagGroups.length > 0 ? (
+                tagGroups.map((group) => {
+                  const selectedTagId = selectedTags[group.id];
+                  const selectedCount = selectedTagId ? 1 : 0;
+
+                  return (
+                    <fieldset
+                      key={group.id}
+                      className="fieldset border border-base-300 rounded-box p-3"
+                    >
+                      <legend className="fieldset-legend w-full">
+                        <div className="w-full flex items-center justify-between gap-2">
+                          <span className="ml-2 font-semibold text-base">
+                            {group.name}
+                          </span>
+                          <span
+                            className={clsx("badge badge-sm", {
+                              "badge-success badge-soft": selectedCount > 0,
+                              "badge-ghost": selectedCount === 0,
+                            })}
+                          >
+                            {selectedCount ? "已选择" : "未选择"}
+                          </span>
+                        </div>
+                      </legend>
+
+                      {group.description ? (
+                        <p className="mb-1">{group.description}</p>
+                      ) : null}
+
+                      <div className="flex flex-wrap gap-4">
+                        {group.tags.map((tag) => {
+                          const isHistoryTag = historyTagIds.includes(tag.id);
+                          return (
+                            <label
+                              key={tag.id}
+                              className="label cursor-pointer gap-2"
+                            >
+                              <input
+                                type="radio"
+                                name={`judging-tag-group-${group.id}`}
+                                className="radio radio-primary radio-sm"
+                                checked={selectedTags[group.id] === tag.id}
+                                onChange={() => handleSelectJudgingTag(group.id, tag.id)}
+                              />
+                              <span 
+                                className={clsx("text-sm", {
+                                  "font-bold": isHistoryTag
+                                })}
+                              >
+                                {tag.name}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  );
+                })
+              ) : (
+                <div className="alert alert-soft alert-warning">
+                  暂无可选标签分组
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* 参考精确描述 */}
+          {referenceDescriptions.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold mb-3">参考精确描述</h3>
+              <div className="card bg-base-200 p-4">
+                <ul className="list-disc list-inside space-y-2">
+                  {referenceDescriptions.map((desc, index) => (
+                    <li key={index} className="text-sm">{desc}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+          
+          {/* 玩家精确描述 */}
+          {playerDescriptions.length > 0 && (
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold mb-3">抢答者精确描述</h3>
+              <div className="space-y-3">
+                {playerDescriptions.map((playerDesc) => (
+                  <div key={playerDesc.id} className="card bg-base-200 p-4">
+                    <div className="flex items-start gap-3">
+                      <input
+                        type="checkbox"
+                        className="checkbox checkbox-primary mt-1"
+                        checked={selectedDescriptions.includes(playerDesc.id)}
+                        onChange={() => handleToggleDescription(playerDesc.id)}
+                      />
+                      <div>
+                        <div className="font-semibold">{playerDesc.username}</div>
+                        <div className="text-sm opacity-80 mt-1">{playerDesc.description}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* 操作按钮 */}
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setJudgingDialogOpen(false)}
+            >
+              暂时隐藏
+            </button>
+            <button
+              type="button"
+              className="btn btn-warning"
+              onClick={() => setSkipConfirmDialogOpen(true)}
+            >
+              跳过本题
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setConfirmAnswerDialogOpen(true)}
+            >
+              确认答案
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setJudgingDialogOpen(false)}>close</button>
+        </form>
+      </dialog>
+
+      {/* 跳过本题确认弹窗 */}
+      <dialog
+        open={skipConfirmDialogOpen}
+        className="modal modal-open"
+        onClose={() => setSkipConfirmDialogOpen(false)}
+      >
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认跳过本题</h3>
+          <p className="py-4">
+            确定要跳过本题吗？跳过之后将不会对本题进行评分。
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setSkipConfirmDialogOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-warning"
+              onClick={handleJudgeSkip}
+            >
+              确认跳过
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setSkipConfirmDialogOpen(false)}>close</button>
+        </form>
+      </dialog>
+
+      {/* 确认答案弹窗 */}
+      <dialog
+        open={confirmAnswerDialogOpen}
+        className="modal modal-open"
+        onClose={() => setConfirmAnswerDialogOpen(false)}
+      >
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认提交答案</h3>
+          <p className="py-4">
+            确定要提交当前选择的答案吗？提交后将进行评分。
+          </p>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => setConfirmAnswerDialogOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleJudgeSubmit}
+            >
+              确认提交
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button onClick={() => setConfirmAnswerDialogOpen(false)}>close</button>
         </form>
       </dialog>
     </div>
