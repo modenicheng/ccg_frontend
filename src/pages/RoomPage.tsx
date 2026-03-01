@@ -11,7 +11,20 @@ import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
 import type { RoomState } from "../types/store";
-import { UserBar } from "../components";
+import { UserBar, TagGroupSelector, SongInfoCard } from "../components";
+import type {
+  WsTagGroup,
+  WsPlayer,
+  RoomStateMessage,
+  PlayControlMessage,
+  AttemptAnswerMessage,
+} from "../types/wsMessages";
+import {
+  isPlayControlData,
+  mapStatusCodeToStatus,
+  getPlayersSimple,
+  getTagGroupsSimple,
+} from "../types/wsMessages";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -51,92 +64,6 @@ const readCookie = (name: string): string | null => {
   }
 };
 
-type WsTag = {
-  id: number;
-  name: string;
-};
-
-type WsTagGroup = {
-  id: number;
-  name: string;
-  description?: string | null;
-  tags: WsTag[];
-};
-
-type WsPlayer = {
-  id: number;
-  username: string;
-  is_owner: boolean;
-};
-
-type RoomStateInitMessage = {
-  event: 12;
-  ts: number;
-  data: {
-    room_id: string;
-    title: string | null;
-    status: number;
-    host: string | null;
-    owner: string | null;
-    host_player_id: string;
-    players: WsPlayer[];
-    tag_groups: WsTagGroup[];
-    tags: WsTag[];
-  };
-};
-
-type PlayControlData = {
-  progress_ms: number;
-  offset_ts: number;
-  audio_url?: string | null;
-};
-
-type PlayControlMessage = {
-  event: 20 | 21 | 22;
-  ts: number;
-  data: PlayControlData;
-};
-
-type JudgingMessage = {
-  event: typeof GameEventId.JUDGING;
-  ts: number;
-  data: {
-    song?: {
-      title?: string;
-      artist?: string;
-      album?: string;
-      cover_url?: string;
-    };
-  };
-};
-
-type AttemptAnswerMessage = {
-  event: typeof GameEventId.ATTEMPT_ANSWER;
-  ts: number;
-  data: {
-    offset_ts: number;
-    user_id: number;
-  };
-};
-
-const isPlayControlData = (value: unknown): value is PlayControlData => {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<PlayControlData>;
-  return (
-    typeof candidate.progress_ms === "number" &&
-    typeof candidate.offset_ts === "number"
-  );
-};
-
-const mapStatus = (status: number): RoomState["status"] => {
-  if (status === 1) return "playing";
-  if (status === 2) return "ended";
-  return "waiting";
-};
-
 function RoomPage() {
   const { roomid } = useParams();
   const roomId = roomid?.trim() ?? "";
@@ -167,11 +94,12 @@ function RoomPage() {
     readCookie(`ccg-room-user-id:${roomId}`) ?? "",
     10,
   );
-  const userId = user?.id
-    ?? (Number.isFinite(fallbackUserIdFromSession)
+  const userId =
+    user?.id ??
+    (Number.isFinite(fallbackUserIdFromSession)
       ? fallbackUserIdFromSession
-      : null)
-    ?? (Number.isFinite(fallbackUserIdFromCookie)
+      : null) ??
+    (Number.isFinite(fallbackUserIdFromCookie)
       ? fallbackUserIdFromCookie
       : null);
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
@@ -194,14 +122,19 @@ function RoomPage() {
     coverUrl: string;
     platformUrl?: string;
   } | null>(null);
-  const [judgingDialogOpen, setJudgingDialogOpen] = useState<boolean>(false);
-  const [skipConfirmDialogOpen, setSkipConfirmDialogOpen] = useState<boolean>(false);
-  const [confirmAnswerDialogOpen, setConfirmAnswerDialogOpen] = useState<boolean>(false);
-  const [selectedTags, setSelectedTags] = useState<Record<number, number | null>>({});
-  const [selectedDescriptions, setSelectedDescriptions] = useState<number[]>([]);
+  const [selectedTags, setSelectedTags] = useState<
+    Record<number, number | null>
+  >({});
+  const [selectedDescriptions, setSelectedDescriptions] = useState<number[]>(
+    [],
+  );
   const [historyTagIds, setHistoryTagIds] = useState<number[]>([]);
-  const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>([]);
-  const [playerDescriptions, setPlayerDescriptions] = useState<Array<{ id: number; username: string; description: string }>>([]);
+  const [referenceDescriptions, setReferenceDescriptions] = useState<string[]>(
+    [],
+  );
+  const [playerDescriptions, setPlayerDescriptions] = useState<
+    Array<{ id: number; username: string; description: string }>
+  >([]);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -221,6 +154,9 @@ function RoomPage() {
   const canvasInitTimerRef = useRef<number | null>(null);
 
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
+  const judgingDialogRef = useRef<HTMLDialogElement | null>(null);
+  const skipConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const confirmAnswerDialogRef = useRef<HTMLDialogElement | null>(null);
 
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
@@ -324,7 +260,7 @@ function RoomPage() {
   );
 
   const handleTogglePlayPause = useCallback(() => {
-    const nextEvent = 
+    const nextEvent =
       audioState === "running" ? GameEventId.PAUSE : GameEventId.PLAY;
     void sendPlaybackControl(nextEvent);
   }, [audioState, sendPlaybackControl]);
@@ -335,11 +271,13 @@ function RoomPage() {
     }
 
     // 收集选中的标签ID
-    const correctTags = Object.values(selectedTags).filter((tagId): tagId is number => tagId !== null);
-    
+    const correctTags = Object.values(selectedTags).filter(
+      (tagId): tagId is number => tagId !== null,
+    );
+
     // 收集选中的描述ID
     const correctDescriptionIds = selectedDescriptions;
-    
+
     const payload = {
       event: GameEventId.JUDGE_SUBMIT,
       ts: Math.round(getCalibratedNow()),
@@ -347,13 +285,13 @@ function RoomPage() {
         correct_tags: correctTags,
         correct_description_ids: correctDescriptionIds,
         new_correct_descriptions: [],
-        skip_scoring: false
-      }
+        skip_scoring: false,
+      },
     };
 
     void wsRef.current.sendJson(payload);
-    setJudgingDialogOpen(false);
-    setConfirmAnswerDialogOpen(false);
+    judgingDialogRef.current?.close();
+    confirmAnswerDialogRef.current?.close();
   }, [selectedTags, selectedDescriptions, getCalibratedNow, user?.isOwner]);
 
   const handleJudgeSkip = useCallback(() => {
@@ -368,26 +306,26 @@ function RoomPage() {
         correct_tags: [],
         correct_description_ids: [],
         new_correct_descriptions: [],
-        skip_scoring: true
-      }
+        skip_scoring: true,
+      },
     };
 
     void wsRef.current.sendJson(payload);
-    setJudgingDialogOpen(false);
-    setSkipConfirmDialogOpen(false);
+    judgingDialogRef.current?.close();
+    skipConfirmDialogRef.current?.close();
   }, [getCalibratedNow, user?.isOwner]);
 
   const handleSelectJudgingTag = (groupId: number, tagId: number) => {
     setSelectedTags((prev) => ({
       ...prev,
-      [groupId]: tagId
+      [groupId]: tagId,
     }));
   };
 
   const handleToggleDescription = (descriptionId: number) => {
     setSelectedDescriptions((prev) => {
       if (prev.includes(descriptionId)) {
-        return prev.filter(id => id !== descriptionId);
+        return prev.filter((id) => id !== descriptionId);
       } else {
         return [...prev, descriptionId];
       }
@@ -415,7 +353,9 @@ function RoomPage() {
       }
 
       const now = getCalibratedNow();
-      const elapsed = Math.max(0, now - controlData.offset_ts);
+      // offset_ts可能为null，如果为null则使用消息的时间戳
+      const offsetTs = controlData.offset_ts ?? message.ts;
+      const elapsed = Math.max(0, now - offsetTs);
       const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
       const localMs = audioRef.current.currentTimeMs;
       const shouldSeek =
@@ -443,32 +383,56 @@ function RoomPage() {
     setWsClient(wsRef.current);
 
     wsRef.current.on(EventType.HEARTBEAT, heartbeatHandler);
-    wsRef.current.onJsonEvent<RoomStateInitMessage>(
+    wsRef.current.onJsonEvent<RoomStateMessage>(
       GameEventId.ROOM_STATE,
       (message) => {
         const payload = message.data;
 
+        // 从玩家列表中获取房主
+        const ownerPlayer = payload.players.find((p) => p.is_owner);
+        const hostPlayerId = ownerPlayer ? ownerPlayer.id.toString() : "";
+
+        // 创建兼容性字段
+        const playersSimple = getPlayersSimple(payload.players);
+        const tagGroupsSimple = getTagGroupsSimple(payload.tag_groups);
+        const playProgress = payload.playback_status?.progress_ms || 0;
+        const startPositionPercent = payload.song_start_range_percent || 0;
+
         const nextRoomState: RoomState = {
+          // 基础字段
           roomId: payload.room_id,
-          hostPlayerId: payload.host_player_id,
-          status: mapStatus(payload.status),
           title: payload.title,
+          status: mapStatusCodeToStatus(payload.status),
+          statusCode: payload.status,
+
+          // 播放相关
+          song_start_range_percent: payload.song_start_range_percent,
+
+          // 玩家和队列
+          players: payload.players,
+          answer_queue: payload.answer_queue,
+
+          // 标签系统
+          tag_groups: payload.tag_groups,
+
+          // 播放状态
+          playback_status: payload.playback_status,
+
+          // 兼容性字段（为现有UI保留）
           description: null,
-          players: payload.players.map((player) => player.username),
-          songQueue: [],
-          tagGroups: payload.tag_groups.reduce<Record<string, string[]>>(
-            (acc, group) => {
-              acc[group.name] = group.tags.map((tag) => tag.name);
-              return acc;
-            },
-            {},
-          ),
-          playProgress: 0,
-          startPositionPercent: 0,
+          hostPlayerId,
+          playersSimple,
+          tagGroupsSimple,
+          playProgress,
+          startPositionPercent,
+          songQueue: [], // 暂时为空，可能需要从其他数据推导
         };
 
         gameStore.getState().setRoomState(nextRoomState);
-        setRoomOwner(payload.owner ?? payload.host ?? "-");
+
+        // 更新本地状态
+        const ownerName = ownerPlayer?.username || "-";
+        setRoomOwner(ownerName);
         setOnlinePlayers(payload.players);
         setAnswerOrderByUserId({});
 
@@ -544,22 +508,22 @@ function RoomPage() {
           platformUrl: message.data.song.platform_url || undefined,
         });
       }
-      
+
       // 存储历史标签ID
       setHistoryTagIds(message.data?.history_tag_ids || []);
-      
+
       // 存储参考精确描述
       setReferenceDescriptions(message.data?.reference_descriptions || []);
-      
+
       // 存储玩家精确描述
       setPlayerDescriptions(message.data?.player_descriptions || []);
-      
+
       // 初始化选中的标签
       const initialSelectedTags: Record<number, number | null> = {};
-      tagGroups.forEach(group => {
+      tagGroups.forEach((group) => {
         // 检查是否有且仅有一个标签在历史标签中
-        const groupTagsInHistory = group.tags.filter(tag => 
-          message.data?.history_tag_ids?.includes(tag.id)
+        const groupTagsInHistory = group.tags.filter((tag) =>
+          message.data?.history_tag_ids?.includes(tag.id),
         );
         if (groupTagsInHistory.length === 1) {
           initialSelectedTags[group.id] = groupTagsInHistory[0].id;
@@ -568,14 +532,11 @@ function RoomPage() {
         }
       });
       setSelectedTags(initialSelectedTags);
-      
+
       // 重置选中的描述
       setSelectedDescriptions([]);
-      
-      // 如果是房主，显示确认答案弹窗
-      if (user?.isOwner) {
-        setJudgingDialogOpen(true);
-      }
+
+      // 判分时不自动显示确认答案弹窗
     });
 
     wsRef.current.onJsonEvent<{
@@ -621,6 +582,8 @@ function RoomPage() {
     setRoomId,
     setUrl,
     setWsClient,
+    tagGroups,
+    user?.isOwner,
   ]);
 
   useEffect(() => {
@@ -904,43 +867,13 @@ function RoomPage() {
         </div>
       </div>
       <div className="flex gap-2 w-full">
-        <div className="card shadow-sm flex-1">
-          <div className="card-body">
-            <div className="flex flex-row gap-4">
-              <figure>
-                <img
-                  className="h-32 rounded-md"
-                  src={
-                    isJudging && currentSong
-                      ? currentSong.coverUrl
-                      : "https://via.placeholder.com/128x128/cccccc/666666?text=?"
-                  }
-                  alt=""
-                />
-              </figure>
-              <div className="flex flex-col gap-1">
-                <h2 className="text-2xl font-semibold">
-                  {isJudging && currentSong
-                    ? currentSong.title
-                    : "????????????????"}
-                </h2>
-                <h2 className="text-lg">
-                  {isJudging && currentSong
-                    ? currentSong.album
-                    : "????????????????"}
-                </h2>
-                <div className="text-md mt-4 opacity-70">
-                  {isJudging && currentSong ? currentSong.artist : "????????"}
-                </div>
-                <div className="text-md opacity-70">
-                  {isJudging && currentSong
-                    ? currentSong.album
-                    : "????????????????????????"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SongInfoCard
+          songInfo={isJudging ? currentSong : null}
+          isJudging={isJudging}
+          compact={true}
+          className="flex-1"
+          showAlbum={true}
+        />
         {user?.isOwner ? (
           <div className="card shadow-sm min-w-xs">
             <div className="card-body">
@@ -968,6 +901,19 @@ function RoomPage() {
                 />
                 {audioState === "running" ? "暂停" : "播放"}
               </div>
+              {isJudging && (
+                <div
+                  className="btn btn-primary btn-sm btn-soft"
+                  onClick={() => judgingDialogRef.current?.showModal()}
+                >
+                  <Icon
+                    icon="heroicons:scale"
+                    width={16}
+                    height={16}
+                  />
+                  判分面板
+                </div>
+              )}
               <div className="btn btn-info btn-sm btn-soft">
                 <Icon
                   icon="heroicons:chevron-double-right-20-solid"
@@ -1019,77 +965,14 @@ function RoomPage() {
             </div>
           </button>
         </div>
-        <div className="card shadow-sm flex-1 min-h-56">
-          <div className="card-body">
-            <h2 className="text-lg font-semibold flex items-center">
-              <Icon
-                icon="heroicons:tag"
-                width={24}
-                height={24}
-                className="inline mr-1"
-              />
-              选择 Tags
-            </h2>
-            <div className="divider m-0"></div>
-            <div className="space-y-4">
-              {tagGroups.length > 0 ? (
-                tagGroups.map((group) => {
-                  const selectedTagId = selectedTagByGroup[group.id];
-                  const selectedCount = selectedTagId ? 1 : 0;
-
-                  return (
-                    <fieldset
-                      key={group.id}
-                      className="fieldset border border-base-300 rounded-box p-3"
-                    >
-                      <legend className="fieldset-legend w-full">
-                        <div className="w-full flex items-center justify-between gap-2">
-                          <span className="ml-2 font-semibold text-base">
-                            {group.name}
-                          </span>
-                          <span
-                            className={clsx("badge badge-sm", {
-                              "badge-success badge-soft": selectedCount > 0,
-                              "badge-ghost": selectedCount === 0,
-                            })}
-                          >
-                            {selectedCount ? "已选择" : "未选择"}
-                          </span>
-                        </div>
-                      </legend>
-
-                      {group.description ? (
-                        <p className="mb-1">{group.description}</p>
-                      ) : null}
-
-                      <div className="flex flex-wrap gap-4">
-                        {group.tags.map((tag) => (
-                          <label
-                            key={tag.id}
-                            className="label cursor-pointer gap-2"
-                          >
-                            <input
-                              type="radio"
-                              name={`tag-group-${group.id}`}
-                              className="radio radio-primary radio-sm"
-                              checked={selectedTagByGroup[group.id] === tag.id}
-                              onChange={() => selectGroupTag(group.id, tag.id)}
-                            />
-                            <span className="text-sm">{tag.name}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </fieldset>
-                  );
-                })
-              ) : (
-                <div className="alert alert-soft alert-warning">
-                  暂无可选标签分组
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <TagGroupSelector
+          tagGroups={tagGroups}
+          selectedTags={selectedTagByGroup}
+          onSelectTag={selectGroupTag}
+          showHeader={true}
+          headerText="选择 Tags"
+          className="flex-1 min-h-56"
+        />
         <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
           <div className="card-body p-2">
             <ul className="list gap-2">
@@ -1123,7 +1006,9 @@ function RoomPage() {
                   );
                 })
               ) : (
-                <li className="list-row px-2 text-sm opacity-60">暂无在线玩家</li>
+                <li className="list-row px-2 text-sm opacity-60">
+                  暂无在线玩家
+                </li>
               )}
             </ul>
           </div>
@@ -1232,118 +1117,45 @@ function RoomPage() {
 
       {/* 房主确认正确答案弹窗 */}
       <dialog
-        open={judgingDialogOpen}
-        className="modal modal-open"
-        onClose={() => setJudgingDialogOpen(false)}
+        ref={judgingDialogRef}
+        className="modal"
       >
         <div className="modal-box w-11/12 max-w-4xl">
           <h2 className="font-bold text-2xl">确认正确答案</h2>
-          
+
           {/* 曲目信息 */}
           {currentSong && (
-            <div 
-              className="card bg-base-200 mb-4 cursor-pointer"
+            <SongInfoCard
+              songInfo={currentSong}
+              isJudging={true}
+              compact={false}
+              clickable={true}
               onClick={() => {
                 if (currentSong.platformUrl) {
-                  window.open(currentSong.platformUrl, '_blank');
+                  window.open(currentSong.platformUrl, "_blank");
                 }
               }}
-            >
-              <div className="card-body">
-                <div className="flex flex-row gap-4">
-                  <figure>
-                    <img
-                      className="h-32 rounded-md"
-                      src={currentSong.coverUrl || "https://via.placeholder.com/128x128/cccccc/666666?text=?"}
-                      alt=""
-                    />
-                  </figure>
-                  <div className="flex flex-col gap-1">
-                    <h3 className="text-2xl font-semibold">{currentSong.title}</h3>
-                    <h4 className="text-lg">{currentSong.album}</h4>
-                    <div className="text-md mt-4 opacity-70">{currentSong.artist}</div>
-                    {currentSong.platformUrl && (
-                      <div className="text-sm text-blue-500 mt-2">
-                        点击查看曲目详情
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+              className="mb-4"
+              showAlbum={true}
+              showPlatformHint={true}
+            />
           )}
-          
+
           {/* TagGroup选择 */}
           <div className="mb-4">
             <h3 className="text-lg font-semibold mb-3">选择正确标签</h3>
-            <div className="space-y-4">
-              {tagGroups.length > 0 ? (
-                tagGroups.map((group) => {
-                  const selectedTagId = selectedTags[group.id];
-                  const selectedCount = selectedTagId ? 1 : 0;
-
-                  return (
-                    <fieldset
-                      key={group.id}
-                      className="fieldset border border-base-300 rounded-box p-3"
-                    >
-                      <legend className="fieldset-legend w-full">
-                        <div className="w-full flex items-center justify-between gap-2">
-                          <span className="ml-2 font-semibold text-base">
-                            {group.name}
-                          </span>
-                          <span
-                            className={clsx("badge badge-sm", {
-                              "badge-success badge-soft": selectedCount > 0,
-                              "badge-ghost": selectedCount === 0,
-                            })}
-                          >
-                            {selectedCount ? "已选择" : "未选择"}
-                          </span>
-                        </div>
-                      </legend>
-
-                      {group.description ? (
-                        <p className="mb-1">{group.description}</p>
-                      ) : null}
-
-                      <div className="flex flex-wrap gap-4">
-                        {group.tags.map((tag) => {
-                          const isHistoryTag = historyTagIds.includes(tag.id);
-                          return (
-                            <label
-                              key={tag.id}
-                              className="label cursor-pointer gap-2"
-                            >
-                              <input
-                                type="radio"
-                                name={`judging-tag-group-${group.id}`}
-                                className="radio radio-primary radio-sm"
-                                checked={selectedTags[group.id] === tag.id}
-                                onChange={() => handleSelectJudgingTag(group.id, tag.id)}
-                              />
-                              <span 
-                                className={clsx("text-sm", {
-                                  "font-bold": isHistoryTag
-                                })}
-                              >
-                                {tag.name}
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </fieldset>
-                  );
-                })
-              ) : (
-                <div className="alert alert-soft alert-warning">
-                  暂无可选标签分组
-                </div>
-              )}
-            </div>
+            <TagGroupSelector
+              tagGroups={tagGroups}
+              selectedTags={selectedTags}
+              onSelectTag={handleSelectJudgingTag}
+              highlightTagIds={historyTagIds}
+              readOnly={false}
+              showHeader={false}
+              showEmptyState={true}
+              emptyStateText="暂无可选标签分组"
+            />
           </div>
-          
+
           {/* 参考精确描述 */}
           {referenceDescriptions.length > 0 && (
             <div className="mb-4">
@@ -1351,13 +1163,15 @@ function RoomPage() {
               <div className="card bg-base-200 p-4">
                 <ul className="list-disc list-inside space-y-2">
                   {referenceDescriptions.map((desc, index) => (
-                    <li key={index} className="text-sm">{desc}</li>
+                    <li key={index} className="text-sm">
+                      {desc}
+                    </li>
                   ))}
                 </ul>
               </div>
             </div>
           )}
-          
+
           {/* 玩家精确描述 */}
           {playerDescriptions.length > 0 && (
             <div className="mb-4">
@@ -1373,8 +1187,12 @@ function RoomPage() {
                         onChange={() => handleToggleDescription(playerDesc.id)}
                       />
                       <div>
-                        <div className="font-semibold">{playerDesc.username}</div>
-                        <div className="text-sm opacity-80 mt-1">{playerDesc.description}</div>
+                        <div className="font-semibold">
+                          {playerDesc.username}
+                        </div>
+                        <div className="text-sm opacity-80 mt-1">
+                          {playerDesc.description}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1382,42 +1200,41 @@ function RoomPage() {
               </div>
             </div>
           )}
-          
+
           {/* 操作按钮 */}
           <div className="flex justify-end gap-3">
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setJudgingDialogOpen(false)}
+              onClick={() => judgingDialogRef.current?.close()}
             >
               暂时隐藏
             </button>
             <button
               type="button"
               className="btn btn-warning"
-              onClick={() => setSkipConfirmDialogOpen(true)}
+              onClick={() => skipConfirmDialogRef.current?.showModal()}
             >
               跳过本题
             </button>
             <button
               type="button"
               className="btn btn-primary"
-              onClick={() => setConfirmAnswerDialogOpen(true)}
+              onClick={() => confirmAnswerDialogRef.current?.showModal()}
             >
               确认答案
             </button>
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">
-          <button onClick={() => setJudgingDialogOpen(false)}>close</button>
+          <button>关闭</button>
         </form>
       </dialog>
 
       {/* 跳过本题确认弹窗 */}
       <dialog
-        open={skipConfirmDialogOpen}
-        className="modal modal-open"
-        onClose={() => setSkipConfirmDialogOpen(false)}
+        ref={skipConfirmDialogRef}
+        className="modal"
       >
         <div className="modal-box max-w-md">
           <h3 className="font-bold text-lg">确认跳过本题</h3>
@@ -1428,7 +1245,7 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setSkipConfirmDialogOpen(false)}
+              onClick={() => skipConfirmDialogRef.current?.close()}
             >
               取消
             </button>
@@ -1442,26 +1259,23 @@ function RoomPage() {
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">
-          <button onClick={() => setSkipConfirmDialogOpen(false)}>close</button>
+          <button>关闭</button>
         </form>
       </dialog>
 
       {/* 确认答案弹窗 */}
       <dialog
-        open={confirmAnswerDialogOpen}
-        className="modal modal-open"
-        onClose={() => setConfirmAnswerDialogOpen(false)}
+        ref={confirmAnswerDialogRef}
+        className="modal"
       >
         <div className="modal-box max-w-md">
           <h3 className="font-bold text-lg">确认提交答案</h3>
-          <p className="py-4">
-            确定要提交当前选择的答案吗？提交后将进行评分。
-          </p>
+          <p className="py-4">确定要提交当前选择的答案吗？提交后将进行评分。</p>
           <div className="flex justify-end gap-3">
             <button
               type="button"
               className="btn btn-ghost"
-              onClick={() => setConfirmAnswerDialogOpen(false)}
+              onClick={() => confirmAnswerDialogRef.current?.close()}
             >
               取消
             </button>
@@ -1475,7 +1289,7 @@ function RoomPage() {
           </div>
         </div>
         <form method="dialog" className="modal-backdrop">
-          <button onClick={() => setConfirmAnswerDialogOpen(false)}>close</button>
+          <button>关闭</button>
         </form>
       </dialog>
     </div>

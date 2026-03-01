@@ -1,3 +1,12 @@
+// 从wsMessages导入类型以保持一致性
+import type {
+  WsTag as RoomStateTagItem,
+  WsTagGroup as RoomStateTagGroupItem,
+  WsPlayer as RoomStatePlayerItem,
+  AnswerQueueItem,
+  PlaybackState
+} from "./wsMessages";
+
 export interface AudioState {
   volume: number;
   isPlaying: boolean;
@@ -24,16 +33,33 @@ export interface UserState {
 }
 
 export interface RoomState {
+  // 基础字段
   roomId: string;
-  hostPlayerId: string;
-  status: "waiting" | "playing" | "ended";
   title: string | null;
-  description: string | null;
-  players: string[];
-  songQueue: string[];
-  tagGroups: Record<string, string[]>;
-  playProgress: number;
-  startPositionPercent: number;
+  status: "waiting" | "playing" | "ended"; // 转换后的状态，对应后端的0,1,2
+  statusCode: 0 | 1 | 2; // 原始状态码
+
+  // 播放相关
+  song_start_range_percent: number | null;
+
+  // 玩家和队列
+  players: RoomStatePlayerItem[]; // 完整的玩家对象
+  answer_queue: AnswerQueueItem[];
+
+  // 标签系统
+  tag_groups: RoomStateTagGroupItem[];
+
+  // 播放状态
+  playback_status: PlaybackState | null;
+
+  // 兼容性字段（为现有UI保留）
+  description: string | null; // 向后兼容
+  hostPlayerId: string; // 向后兼容，从players中推导
+  playersSimple: string[]; // 简化版本，仅用户名数组
+  tagGroupsSimple: Record<string, string[]>; // 简化版本，组名->标签名数组
+  playProgress: number; // 向后兼容，从playback_status.progress_ms推导
+  startPositionPercent: number; // 向后兼容，从song_start_range_percent推导
+  songQueue: string[]; // 向后兼容，可能需要从其他数据推导
 }
 
 export interface PlayerScore {
