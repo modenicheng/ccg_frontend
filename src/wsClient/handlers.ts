@@ -1,8 +1,7 @@
-import { AudioFrame, HeartbeatFrame } from "./dataFrames";
-import { AudioEncoding, HeartbeatType } from "../types/eventTypes";
+import { HeartbeatFrame } from "./dataFrames";
+import { HeartbeatType } from "../types/eventTypes";
 import { WS } from ".";
 import useWebSocketStore from "../stores/webSocketStore";
-import { streamAudio } from "../audioPlayer";
 
 // 客户端PING发送记录，存储UID和HeartbeatFrame
 const pendingPings = new Map<
@@ -178,43 +177,4 @@ export const startHeartbeat = (
   };
 };
 
-export const audioFrameHandler = async (data: ArrayBuffer) => {
-  // 这里可以处理音频帧数据，例如解码、播放等
-  const audioFrame = AudioFrame.load(data);
-  if (audioFrame.encoding === AudioEncoding.UNKNOWN) {
-    console.warn(`Received audio frame with unknown encoding, cannot process.`);
-    return;
-  }
-  if (audioFrame.encoding === AudioEncoding.OPUS) {
-    // here is the decoding logic
-    // we need pcm data to play.
-  } else if (audioFrame.encoding === AudioEncoding.PCM) {
-    console.debug(
-      `Received PCM audio frame, ready for playback. Timestamp: ${audioFrame.timestamp}`,
-    );
 
-    // Ensure AudioContext is initialized before sending data
-    streamAudio.initAudioContext();
-
-    // We got PCM Uint8 data from server (PCM represented as unsigned 32-bit integers, but seperated by 4 bytes),
-    // so we need to convert it to Float32Array before sending to AudioWorklet for playback.
-    const pcmData = new Float32Array(audioFrame.data.length / 4);
-    for (let i = 0; i < pcmData.length; i++) {
-      // Convert each 4-byte chunk to a Float32 value
-      // Note: This assumes the PCM data is in little-endian format and represents signed 32-bit integers.
-      const value =
-        audioFrame.data[i * 4] |
-        (audioFrame.data[i * 4 + 1] << 8) |
-        (audioFrame.data[i * 4 + 2] << 16) |
-        (audioFrame.data[i * 4 + 3] << 24);
-      // Here is the condition that the PCM data is in big-endian format.
-      // const value = (audioFrame.data[i * 4] << 24) |
-      //   (audioFrame.data[i * 4 + 1] << 16) |
-      //   (audioFrame.data[i * 4 + 2] << 8) |
-      //   audioFrame.data[i * 4 + 3];
-
-      pcmData[i] = value / (0x7fffffff + 1); // Normalize to [-1.0, 1.0]
-    }
-    streamAudio.sendPCMToWorklet(pcmData);
-  }
-};
