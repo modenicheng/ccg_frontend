@@ -3,8 +3,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Icon } from "@iconify-icon/react";
 import { TagList } from "../components";
 import { gameStore, useGameStore } from "../stores/gameStore";
+import type { RoomState } from "../types/store";
 import useWebSocketStore from "../stores/webSocketStore";
-import { getRoomInfo, patchRoomInfo } from "../api/room";
+import { getRoomInfo, patchRoomInfo, type RoomInfoResponse } from "../api/room";
 import {
   createTagGroup,
   createTags,
@@ -42,6 +43,28 @@ import {
   clearRoomSongs,
   type RoomSong,
 } from "../api/room_songs";
+
+function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
+  const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
+  return {
+    roomId: data.roomId,
+    title: data.title ?? null,
+    status: data.status,
+    statusCode,
+    song_start_range_percent: null,
+    players: [], // full player objects not available
+    answer_queue: [],
+    tag_groups: [],
+    playback_status: null,
+    description: data.description ?? null,
+    hostPlayerId: data.hostPlayerId,
+    playersSimple: data.players,
+    tagGroupsSimple: data.tagGroups,
+    playProgress: data.playProgress,
+    startPositionPercent: data.startPositionPercent ?? 0,
+    songQueue: data.songQueue,
+  };
+}
 
 const RoomManagePage = () => {
   const { roomid } = useParams<{ roomid: string }>();
@@ -311,18 +334,7 @@ const RoomManagePage = () => {
           return;
         }
 
-        gameStore.getState().setRoomState({
-          roomId: roomInfo.roomId,
-          hostPlayerId: roomInfo.hostPlayerId,
-          status: roomInfo.status,
-          title: roomInfo.title ?? "",
-          description: roomInfo.description ?? null,
-          players: roomInfo.players,
-          songQueue: roomInfo.songQueue,
-          tagGroups: roomInfo.tagGroups,
-          playProgress: roomInfo.playProgress,
-          startPositionPercent: roomInfo.startPositionPercent ?? 0,
-        });
+        gameStore.getState().setRoomState(mapRoomInfoToRoomState(roomInfo));
 
         const selectedIds = allGroups
           .filter((group) => roomInfo.tagGroups[group.name])
@@ -736,18 +748,7 @@ const RoomManagePage = () => {
         tagGroupIds: selectedTagGroupIds,
       });
 
-      gameStore.getState().setRoomState({
-        roomId: room.roomId,
-        hostPlayerId: room.hostPlayerId,
-        status: room.status,
-        title: room.title ?? "",
-        description: room.description ?? null,
-        players: room.players,
-        songQueue: room.songQueue,
-        tagGroups: room.tagGroups,
-        playProgress: room.playProgress,
-        startPositionPercent: room.startPositionPercent ?? 0,
-      });
+      gameStore.getState().setRoomState(mapRoomInfoToRoomState(room));
 
       setInitialTitle(room.title ?? "");
       setInitialSelectedIds(selectedTagGroupIds);
@@ -1373,7 +1374,7 @@ const RoomManagePage = () => {
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="opacity-70">玩家数量</span>
-                  <span>{roomState?.players?.length || 0}</span>
+                  <span>{roomState?.playersSimple?.length || 0}</span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="opacity-70">已选 TagGroup</span>

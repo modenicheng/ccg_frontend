@@ -1,6 +1,5 @@
 // 从wsMessages导入类型以保持一致性
 import type {
-  WsTag as RoomStateTagItem,
   WsTagGroup as RoomStateTagGroupItem,
   WsPlayer as RoomStatePlayerItem,
   AnswerQueueItem,

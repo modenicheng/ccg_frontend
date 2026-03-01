@@ -60,12 +60,27 @@ export const gameStore = create<GameState>((set, get) => ({
 
     try {
       const data = await getRoomInfo(roomState.roomId);
+      // Map RoomInfoResponse (simplified) to RoomState
+      const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
       const nextRoomState: RoomState = {
+        // Keep existing full objects
         ...roomState,
-        ...data,
-        status: data.status as RoomState["status"],
-        startPositionPercent:
-          data.startPositionPercent ?? roomState.startPositionPercent,
+        // Update fields from simplified API
+        roomId: data.roomId,
+        title: data.title ?? "",
+        status: data.status,
+        statusCode,
+        description: data.description ?? null,
+        hostPlayerId: data.hostPlayerId,
+        playersSimple: data.players,
+        tagGroupsSimple: data.tagGroups,
+        playProgress: data.playProgress,
+        startPositionPercent: data.startPositionPercent ?? 0,
+        songQueue: data.songQueue,
+        // song_start_range_percent not provided, keep existing
+        // answer_queue not provided, keep existing
+        // playback_status not provided, keep existing
+        // players and tag_groups keep existing (full objects)
       };
 
       set({ roomState: nextRoomState });

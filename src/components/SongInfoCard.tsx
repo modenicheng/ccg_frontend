@@ -35,7 +35,7 @@ interface SongInfoCardProps {
  */
 export function SongInfoCard({
   songInfo,
-  isJudging = false,
+  isJudging: _isJudging = false,
   compact = false,
   clickable = false,
   onClick,
@@ -45,6 +45,7 @@ export function SongInfoCard({
   defaultCoverUrl = "https://via.placeholder.com/128x128/cccccc/666666?text=?",
 }: SongInfoCardProps) {
   // 如果没有曲目信息，显示占位符
+  void _isJudging;
   if (!songInfo) {
     return (
       <div className={clsx("card shadow-sm flex-1", className)}>
