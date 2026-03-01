@@ -148,6 +148,7 @@ function RoomPage() {
 
   const audioRef = useRef<audioPlayer | null>(null);
   const [audioState, setAudioState] = useState<string>("suspended");
+  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -349,9 +350,6 @@ function RoomPage() {
         return;
       }
 
-      if (controlData.audio_url && controlData.audio_url !== SYNC_AUDIO_URL) {
-        return;
-      }
 
       const now = getCalibratedNow();
       // offset_ts可能为null，如果为null则使用消息的时间戳
@@ -386,7 +384,7 @@ function RoomPage() {
     wsRef.current.on(EventType.HEARTBEAT, heartbeatHandler);
     wsRef.current.onJsonEvent<RoomStateMessage>(
       GameEventId.ROOM_STATE,
-      (message) => {
+      async (message) => {
         const payload = message.data;
 
         // 从玩家列表中获取房主
@@ -430,6 +428,47 @@ function RoomPage() {
         };
 
         gameStore.getState().setRoomState(nextRoomState);
+
+        // 同步音频播放器状态
+        const playbackStatus = payload.playback_status;
+        const audioPlayer = audioRef.current;
+
+        if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
+          try {
+            // 检查是否需要切换音频URL
+            const newAudioUrl = playbackStatus.audio_url;
+            if (newAudioUrl && newAudioUrl !== currentAudioUrl) {
+              // 切换音频源
+              await audioPlayer.preload(newAudioUrl);
+              await audioPlayer.playUrlAsStream(newAudioUrl, false);
+              setCurrentAudioUrl(newAudioUrl);
+            }
+
+            // 创建伪PlayControlMessage用于applyRemoteProgress
+            const pseudoMessage = {
+              event: GameEventId.PLAY, // 事件类型不影响applyRemoteProgress逻辑
+              ts: playbackStatus.updated_at,
+              data: {
+                progress_ms: playbackStatus.progress_ms,
+                offset_ts: playbackStatus.offset_ts,
+                audio_url: playbackStatus.audio_url,
+              },
+            } as PlayControlMessage;
+
+            // 强制同步进度
+            applyRemoteProgress(pseudoMessage, true);
+
+            // 同步播放状态
+            if (playbackStatus.play_state === 'playing') {
+              void audioPlayer.resume();
+            } else if (playbackStatus.play_state === 'paused') {
+              void audioPlayer.pause();
+            }
+          } catch (error) {
+            console.error('Failed to sync audio playback:', error);
+            // 音频同步失败，但继续其他初始化
+          }
+        }
 
         // 初始化积分表（后端ROOM_STATE中的scores为累计明细，前端展示总分）
         const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
@@ -627,8 +666,6 @@ function RoomPage() {
         progressBarRef.current.style.width = `${progressPercent}%`;
       }
     };
-    audioRef.current.preload(SYNC_AUDIO_URL);
-    audioRef.current.playUrlAsStream(SYNC_AUDIO_URL, false);
     return () => {
       if (canvasInitTimerRef.current !== null) {
         window.clearTimeout(canvasInitTimerRef.current);
