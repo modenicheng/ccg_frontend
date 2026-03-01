@@ -19,6 +19,21 @@ function HomePage() {
 
   const persistStore = usePersistStore();
 
+  const setCookie = (name: string, value: string) => {
+    const setWithDocumentCookie = () => {
+      document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;
+    };
+    if (typeof cookieStore !== "undefined") {
+      try {
+        cookieStore.set(name, value).catch(setWithDocumentCookie);
+      } catch {
+        setWithDocumentCookie();
+      }
+    } else {
+      setWithDocumentCookie();
+    }
+  };
+
   const handleCreateRoom = async (ev: FormEvent) => {
     ev.preventDefault();
     const hostName = hostNameInput.trim();
@@ -39,9 +54,9 @@ function HomePage() {
         hostName,
         title,
       });
-      cookieStore.set(`ccg-room-token:${room.roomId}`, room.host.token);
-      cookieStore.set(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
-      cookieStore.set(`ccg-room-username:${room.roomId}`, room.host.username);
+      setCookie(`ccg-room-token:${room.roomId}`, room.host.token);
+      setCookie(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
+      setCookie(`ccg-room-username:${room.roomId}`, room.host.username);
       sessionStorage.setItem(`ccg-room-token:${room.roomId}`, room.host.token);
       sessionStorage.setItem(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
       sessionStorage.setItem(
@@ -78,12 +93,9 @@ function HomePage() {
     setError(null);
     try {
       const result = await joinRoom({ roomId, username });
-      cookieStore.set(`ccg-room-token:${result.roomId}`, result.user.token);
-      cookieStore.set(`ccg-room-user-id:${result.roomId}`, `${result.user.id}`);
-      cookieStore.set(
-        `ccg-room-username:${result.roomId}`,
-        result.user.username,
-      );
+      setCookie(`ccg-room-token:${result.roomId}`, result.user.token);
+      setCookie(`ccg-room-user-id:${result.roomId}`, `${result.user.id}`);
+      setCookie(`ccg-room-username:${result.roomId}`, result.user.username);
       sessionStorage.setItem(`ccg-room-token:${result.roomId}`, result.user.token);
       sessionStorage.setItem(
         `ccg-room-user-id:${result.roomId}`,
