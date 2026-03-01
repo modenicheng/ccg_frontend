@@ -4,6 +4,7 @@ type UserBarProps = {
   order?: number;
   activate?: boolean;
   answering?: boolean;
+  isSelf?: boolean;
 };
 
 export const UserBar: React.FC<UserBarProps> = ({
@@ -11,6 +12,7 @@ export const UserBar: React.FC<UserBarProps> = ({
   order,
   activate = false,
   answering = false,
+  isSelf = false,
 }) => {
   return (
     <>
@@ -48,7 +50,7 @@ export const UserBar: React.FC<UserBarProps> = ({
             >
               {username}
             </div>
-            <div className="badge badge-soft badge-info ml-auto">我</div>
+            {isSelf ? <div className="badge badge-soft badge-info ml-auto">我</div> : null}
           </div>
         </div>
       </div>

@@ -54,6 +54,12 @@ export interface RoomStateData {
   tag_groups: WsTagGroup[];
   answer_queue: AnswerQueueItem[];
   playback_status: PlaybackState | null;
+  scores: Array<{
+    player_id: number;
+    round_index: number;
+    score_delta: number;
+    total_score: number;
+  }>;
   // 注意：后端消息中可能还包含其他字段如host_player_id，但不在ClientRoomState中
 }
 

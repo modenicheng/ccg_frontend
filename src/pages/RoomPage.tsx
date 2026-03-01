@@ -105,6 +105,7 @@ function RoomPage() {
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
   const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
+  const scores = useGameStore((state) => state.scores);
   const [roomOwner, setRoomOwner] = useState<string>("-");
   const [tagGroups, setTagGroups] = useState<WsTagGroup[]>([]);
   const [onlinePlayers, setOnlinePlayers] = useState<WsPlayer[]>([]);
@@ -430,11 +431,35 @@ function RoomPage() {
 
         gameStore.getState().setRoomState(nextRoomState);
 
+        // 初始化积分表（后端ROOM_STATE中的scores为累计明细，前端展示总分）
+        const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
+          (acc, item) => {
+            const prev = acc[item.player_id] ?? 0;
+            acc[item.player_id] = Math.max(prev, item.total_score);
+            return acc;
+          },
+          {},
+        );
+        gameStore.getState().setScores(
+          payload.players.map((player) => ({
+            player_id: player.id,
+            username: player.username,
+            score: scoreByPlayerId[player.id] ?? 0,
+          })),
+        );
+
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        setOnlinePlayers(payload.players);
-        setAnswerOrderByUserId({});
+        setOnlinePlayers(payload.players.filter((player) => player.online));
+        setAnswerOrderByUserId(
+          payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
+            const order =
+              item.order ?? acc[item.player_id] ?? Object.keys(acc).length + 1;
+            acc[item.player_id] = order;
+            return acc;
+          }, {}),
+        );
 
         setTagGroups(payload.tag_groups);
         setSelectedTagByGroup(
@@ -498,6 +523,7 @@ function RoomPage() {
       };
     }>(GameEventId.JUDGING, (message) => {
       setIsJudging(true);
+      const latestTagGroups = gameStore.getState().roomState?.tag_groups ?? [];
       // 判分时显示完整曲目信息
       if (message.data?.song) {
         setCurrentSong({
@@ -520,7 +546,7 @@ function RoomPage() {
 
       // 初始化选中的标签
       const initialSelectedTags: Record<number, number | null> = {};
-      tagGroups.forEach((group) => {
+      latestTagGroups.forEach((group) => {
         // 检查是否有且仅有一个标签在历史标签中
         const groupTagsInHistory = group.tags.filter((tag) =>
           message.data?.history_tag_ids?.includes(tag.id),
@@ -582,8 +608,6 @@ function RoomPage() {
     setRoomId,
     setUrl,
     setWsClient,
-    tagGroups,
-    user?.isOwner,
   ]);
 
   useEffect(() => {
@@ -878,12 +902,6 @@ function RoomPage() {
           <div className="card shadow-sm min-w-xs">
             <div className="card-body">
               <div
-                className="btn btn-sm  btn-soft"
-                onClick={() => navigate(`/room/${roomId}/manage`)}
-              >
-                管理页面
-              </div>
-              <div
                 className={clsx("btn btn-sm btn-soft", {
                   "btn-success": audioState !== "running",
                   "btn-warning": audioState === "running",
@@ -901,26 +919,38 @@ function RoomPage() {
                 />
                 {audioState === "running" ? "暂停" : "播放"}
               </div>
-              {isJudging && (
+              <div className="join w-full">
                 <div
-                  className="btn btn-primary btn-sm btn-soft"
+                  className="btn btn-primary btn-sm btn-soft join-item flex-1"
+                  onClick={() => {}}
+                >
+                  开始游戏
+                  {/* 切换房间状态，向后端发送 GAME_START 事件，禁止新玩家加入 */}
+                </div>
+                <div
+                  className="btn btn-info btn-sm btn-soft join-item flex-1"
                   onClick={() => judgingDialogRef.current?.showModal()}
                 >
+                  <Icon icon="heroicons:scale" width={16} height={16} />
+                  判分
+                </div>
+                <div
+                  className="btn btn-warning btn-sm btn-soft join-item flex-1"
+                  onClick={() => skipConfirmDialogRef.current?.showModal()}
+                >
                   <Icon
-                    icon="heroicons:scale"
+                    icon="heroicons:chevron-double-right-20-solid"
                     width={16}
                     height={16}
                   />
-                  判分面板
+                  下一轮
                 </div>
-              )}
-              <div className="btn btn-info btn-sm btn-soft">
-                <Icon
-                  icon="heroicons:chevron-double-right-20-solid"
-                  width={16}
-                  height={16}
-                />
-                下一轮
+              </div>
+              <div
+                className="btn btn-sm  btn-soft"
+                onClick={() => navigate(`/room/${roomId}/manage`)}
+              >
+                管理页面
               </div>
             </div>
           </div>
@@ -1001,6 +1031,7 @@ function RoomPage() {
                         username={player.username}
                         order={order}
                         activate={typeof order === "number"}
+                        isSelf={userId !== null && player.id === userId}
                       />
                     </li>
                   );
@@ -1026,10 +1057,9 @@ function RoomPage() {
               </tr>
             </thead>
             <tbody>
-              {gameStore.getState().scores.length > 0 ? (
-                gameStore
-                  .getState()
-                  .scores.sort((a, b) => b.score - a.score)
+              {scores.length > 0 ? (
+                [...scores]
+                  .sort((a, b) => b.score - a.score)
                   .map((player, index) => (
                     <tr key={player.player_id} className="">
                       <th className="text-end">{index + 1}</th>
@@ -1072,7 +1102,7 @@ function RoomPage() {
               </div>
             </div>
             <div className="text-xs text-gray-400">
-              你可以挑一个自己喜欢的主题~ （浅色调可读性略好）
+              你可以挑一个自己喜欢的主题~
             </div>
           </div>
           <div className="flex flex-col gap-1.5 mt-4">
@@ -1116,10 +1146,7 @@ function RoomPage() {
       </dialog>
 
       {/* 房主确认正确答案弹窗 */}
-      <dialog
-        ref={judgingDialogRef}
-        className="modal"
-      >
+      <dialog ref={judgingDialogRef} className="modal">
         <div className="modal-box w-11/12 max-w-4xl">
           <h2 className="font-bold text-2xl">确认正确答案</h2>
 
@@ -1212,13 +1239,6 @@ function RoomPage() {
             </button>
             <button
               type="button"
-              className="btn btn-warning"
-              onClick={() => skipConfirmDialogRef.current?.showModal()}
-            >
-              跳过本题
-            </button>
-            <button
-              type="button"
               className="btn btn-primary"
               onClick={() => confirmAnswerDialogRef.current?.showModal()}
             >
@@ -1232,10 +1252,7 @@ function RoomPage() {
       </dialog>
 
       {/* 跳过本题确认弹窗 */}
-      <dialog
-        ref={skipConfirmDialogRef}
-        className="modal"
-      >
+      <dialog ref={skipConfirmDialogRef} className="modal">
         <div className="modal-box max-w-md">
           <h3 className="font-bold text-lg">确认跳过本题</h3>
           <p className="py-4">
@@ -1264,10 +1281,7 @@ function RoomPage() {
       </dialog>
 
       {/* 确认答案弹窗 */}
-      <dialog
-        ref={confirmAnswerDialogRef}
-        className="modal"
-      >
+      <dialog ref={confirmAnswerDialogRef} className="modal">
         <div className="modal-box max-w-md">
           <h3 className="font-bold text-lg">确认提交答案</h3>
           <p className="py-4">确定要提交当前选择的答案吗？提交后将进行评分。</p>
