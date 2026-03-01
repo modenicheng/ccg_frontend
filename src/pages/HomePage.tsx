@@ -21,10 +21,12 @@ function HomePage() {
 
   const setCookie = (name: string, value: string) => {
     const setWithDocumentCookie = () => {
-      document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; path=/`;
+      // Only encode the value, not the name (colon ':' is valid in cookie names)
+      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;
     };
     if (typeof cookieStore !== "undefined") {
       try {
+        // cookieStore may default to Secure which fails on HTTP
         cookieStore.set(name, value).catch(setWithDocumentCookie);
       } catch {
         setWithDocumentCookie();
