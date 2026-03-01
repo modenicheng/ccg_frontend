@@ -225,11 +225,16 @@ class audioPlayer {
 
     if (this.preloadTable[url]) {
       console.log(`Using preloaded audio for URL: ${url}`);
-      audio = this.preloadTable[url].cloneNode(true) as HTMLAudioElement;
+      audio = this.preloadTable[url];
+      // 确保音频元素属性正确
       audio.crossOrigin = "anonymous";
       audio.preload = "auto";
       audio.loop = false;
       audio.currentTime = 0;
+      // 如果音频元素尚未加载，重新加载
+      if (audio.readyState < 2) { // HAVE_FETCHED or higher
+        audio.load();
+      }
     } else {
       console.log(
         `No preloaded audio found for URL: ${url}, creating new audio element.`,
@@ -242,6 +247,8 @@ class audioPlayer {
       audio.src = url;
       audio.loop = false;
       audio.load(); // 可选，设置 src 后自动开始加载
+      // 存储预加载引用供下次使用
+      this.preloadTable[url] = audio;
     }
 
     audio.ontimeupdate = this.timeUpdateCallback;
@@ -341,9 +348,35 @@ class audioPlayer {
 
   async resume() {
     if (this.audioElement) {
-      await this.audioElement.play();
-      this.audioState = "running";
-      this.stateChangeCallback?.(this.audioState);
+      // 确保AudioContext处于运行状态
+      if (this.audioCtx.state === "suspended") {
+        await this.audioCtx.resume();
+      }
+      try {
+        await this.audioElement.play();
+        this.audioState = "running";
+        this.stateChangeCallback?.(this.audioState);
+      } catch (err) {
+        console.error("播放失败", err);
+        // 尝试恢复AudioContext后重试一次
+        if (this.audioCtx.state !== "running") {
+          await this.audioCtx.resume();
+          try {
+            await this.audioElement.play();
+            this.audioState = "running";
+            this.stateChangeCallback?.(this.audioState);
+          } catch (retryErr) {
+            console.error("重试播放失败", retryErr);
+            this.audioState = "closed";
+            this.stateChangeCallback?.(this.audioState);
+            throw retryErr;
+          }
+        } else {
+          this.audioState = "closed";
+          this.stateChangeCallback?.(this.audioState);
+          throw err;
+        }
+      }
     }
   }
 
