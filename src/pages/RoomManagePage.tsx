@@ -182,6 +182,12 @@ const RoomManagePage = () => {
   const [selectedRoomSongIds, setSelectedRoomSongIds] = useState<number[]>([]);
   const roomSongsPageSize = 10;
 
+  // 玩家管理状态
+  const [players, setPlayers] = useState<Array<{ id: number; username: string; is_owner: boolean }>>([]);
+  const [isKicking, setIsKicking] = useState<number | null>(null);
+  const [kickError, setKickError] = useState<string | null>(null);
+  const [kickSuccess, setKickSuccess] = useState<string | null>(null);
+
   const loadTagGroups = useCallback(async () => {
     const allGroups = await getTagGroups();
     setTagGroups(allGroups);
@@ -335,6 +341,11 @@ const RoomManagePage = () => {
         }
 
         gameStore.getState().setRoomState(mapRoomInfoToRoomState(roomInfo));
+
+        // 存储玩家详细信息
+        if ('playersDetailed' in roomInfo) {
+          setPlayers(roomInfo.playersDetailed as Array<{ id: number; username: string; is_owner: boolean }>);
+        }
 
         const selectedIds = allGroups
           .filter((group) => roomInfo.tagGroups[group.name])
@@ -1008,6 +1019,33 @@ const RoomManagePage = () => {
     }
   };
 
+  const handleKickUser = async (userId: number) => {
+    if (!roomid || !wsClient) return;
+    setIsKicking(userId);
+    setKickError(null);
+    setKickSuccess(null);
+    try {
+      // 发送踢人事件
+      await wsClient.sendJson({
+        event: 15, // KICK_USER
+        data: { user_id: userId },
+      });
+      setKickSuccess("踢人成功");
+      // 3秒后清除成功消息
+      setTimeout(() => {
+        setKickSuccess(null);
+      }, 3000);
+    } catch (err) {
+      setKickError((err as Error).message || "踢人失败");
+      // 3秒后清除错误消息
+      setTimeout(() => {
+        setKickError(null);
+      }, 3000);
+    } finally {
+      setIsKicking(null);
+    }
+  };
+
   const toggleRoomSongSelection = (songId: number) => {
     setSelectedRoomSongIds((prev) =>
       prev.includes(songId)
@@ -1399,6 +1437,47 @@ const RoomManagePage = () => {
                     ))}
                   {selectedTagGroupIds.length === 0 ? (
                     <span className="text-base-content/60">暂无</span>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="divider my-1" />
+
+              <div className="text-sm">
+                <p className="opacity-70 mb-1">玩家列表</p>
+                {kickError && (
+                  <div className="alert alert-soft alert-error mb-2">
+                    <span>{kickError}</span>
+                  </div>
+                )}
+                {kickSuccess && (
+                  <div className="alert alert-soft alert-success mb-2">
+                    <span>{kickSuccess}</span>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  {players.map((player) => (
+                    <div key={player.id} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span>{player.username}</span>
+                        {player.is_owner && (
+                          <span className="badge badge-primary badge-xs">房主</span>
+                        )}
+                      </div>
+                      {!player.is_owner && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-error btn-outline"
+                          onClick={() => handleKickUser(player.id)}
+                          disabled={isKicking === player.id}
+                        >
+                          {isKicking === player.id ? "踢人中..." : "踢人"}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {players.length === 0 ? (
+                    <span className="text-base-content/60">暂无玩家</span>
                   ) : null}
                 </div>
               </div>

@@ -67,6 +67,7 @@ export interface PatchRoomRequest {
   tagGroupIds?: number[];
 }
 
+
 interface BackendTagResponse {
   id: number;
   name: string;
@@ -84,7 +85,7 @@ interface BackendRoomInfoResponse {
   host_player_id: string;
   status: number;
   title?: string | null;
-  players: Array<{ username: string; is_owner: boolean }>;
+  players: Array<{ id: number; username: string; is_owner: boolean }>;
   tag_groups: BackendTagGroupResponse[];
 }
 
@@ -107,7 +108,7 @@ const mapRoomStatus = (
   return "waiting";
 };
 
-const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse => {
+const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse & { playersDetailed: Array<{ id: number; username: string; is_owner: boolean }> } => {
   const tagGroups = data.tag_groups.reduce<Record<string, string[]>>(
     (acc, group) => {
       acc[group.name] = group.tags.map((tag) => tag.name);
@@ -123,6 +124,7 @@ const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse => {
     title: data.title ?? null,
     description: null,
     players: data.players.map((player) => player.username),
+    playersDetailed: data.players,
     songQueue: [],
     tagGroups,
     playProgress: 0,
@@ -194,3 +196,5 @@ export async function patchRoomInfo(
   );
   return mapRoomInfo(data);
 }
+
+

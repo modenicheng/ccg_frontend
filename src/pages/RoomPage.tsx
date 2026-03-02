@@ -137,6 +137,10 @@ function RoomPage() {
     Array<{ id: number; username: string; description: string }>
   >([]);
 
+  // 准备和倒计时状态
+  const [isReady, setIsReady] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
       ...prev,
@@ -227,6 +231,52 @@ function RoomPage() {
 
     void wsRef.current.sendJson(payload);
   }, [addAttemptOrder, getCalibratedNow, isConnected, userId]);
+
+  const handleReady = useCallback(() => {
+    if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.PLAYER_READY,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        user_id: userId,
+        ready: !isReady,
+      },
+    };
+
+    void wsRef.current.sendJson(payload);
+  }, [isConnected, getCalibratedNow, userId, isReady]);
+
+  const handleLeaveRoom = useCallback(async () => {
+    if (!roomId || userId === null) {
+      return;
+    }
+
+    try {
+      // 发送退出房间事件
+      if (wsRef.current?.isConnected()) {
+        await wsRef.current.sendJson({
+          event: 16, // PLAYER_LEAVE
+          data: { user_id: userId },
+        });
+      }
+
+      // 关闭WebSocket连接
+      wsRef.current?.close();
+
+      // 清除本地存储的房间相关信息
+      sessionStorage.removeItem(`ccg-room-token:${roomId}`);
+      sessionStorage.removeItem(`ccg-room-user-id:${roomId}`);
+      document.cookie = `ccg-room-user-id:${roomId}=; Max-Age=0`;
+
+      // 导航回首页
+      navigate("/");
+    } catch (error) {
+      console.error("退出房间失败:", error);
+    }
+  }, [roomId, userId, navigate]);
 
   const sendPlaybackControl = useCallback(
     async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
@@ -625,6 +675,68 @@ function RoomPage() {
         await audioRef.current?.pause();
       },
     );
+
+    // 处理玩家加入事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.ROOM_JOIN;
+      ts: number;
+      data: {
+        id: number;
+        username: string;
+        is_owner: boolean;
+        online: boolean;
+      };
+    }>(GameEventId.ROOM_JOIN, (message) => {
+      const newPlayer = message.data;
+      if (newPlayer) {
+        setOnlinePlayers((prev) => {
+          // 检查玩家是否已存在
+          const playerExists = prev.some(p => p.id === newPlayer.id);
+          if (playerExists) {
+            // 更新现有玩家信息
+            return prev.map(p => 
+              p.id === newPlayer.id ? newPlayer : p
+            );
+          } else {
+            // 添加新玩家
+            return [...prev, newPlayer];
+          }
+        });
+
+        // 如果新玩家是房主，更新房主信息
+        if (newPlayer.is_owner) {
+          setRoomOwner(newPlayer.username);
+        }
+      }
+    });
+
+    // 处理玩家准备事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.PLAYER_READY;
+      ts: number;
+      data: {
+        user_id: number;
+        ready: boolean;
+      };
+    }>(GameEventId.PLAYER_READY, (message) => {
+      const { user_id, ready } = message.data;
+      if (user_id === userId) {
+        setIsReady(ready);
+      }
+    });
+
+    // 处理倒计时事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.COUNTDOWN;
+      ts: number;
+      data: {
+        seconds: number;
+        all_ready: boolean;
+      };
+    }>(GameEventId.COUNTDOWN, (message) => {
+      const { seconds } = message.data;
+      setCountdown(seconds);
+    });
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -1006,6 +1118,30 @@ function RoomPage() {
             <div className="divider m-0"></div>
             <p className="truncate">标题： {roomState?.title ?? "-"}</p>
             <p>房主： {roomOwner}</p>
+            <div className="divider m-0"></div>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                className={`btn btn-sm ${isReady ? 'btn-success' : 'btn-primary'}`}
+                onClick={handleReady}
+                disabled={!isConnected}
+              >
+                {isReady ? '取消准备' : '准备'}
+              </button>
+              {countdown !== null && (
+                <div className="text-center py-2 bg-base-200 rounded-lg">
+                  <div className="text-sm opacity-70">游戏即将开始</div>
+                  <div className="text-2xl font-bold">{countdown}</div>
+                </div>
+              )}
+              <button
+                type="button"
+                className="btn btn-sm btn-error"
+                onClick={handleLeaveRoom}
+              >
+                退出房间
+              </button>
+            </div>
           </div>
         </div>
       </div>

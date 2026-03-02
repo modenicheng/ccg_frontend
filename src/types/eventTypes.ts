@@ -16,6 +16,7 @@ export const GameEventId = {
   ROOM_STATE: 12,
   GAME_OVER: 13,
   START_POS_UPDATE: 14,
+  PLAYER_JOIN: 15,
 
   PLAY: 20,
   PAUSE: 21,
