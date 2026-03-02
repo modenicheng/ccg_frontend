@@ -96,7 +96,8 @@ src/
 ## 路由说明
 
 - `/`：创建/加入房间页面
-- `/room/:roomid`：房间页面（原先 `App.tsx` 的主要内容）
+- `/room/:roomid`：房间页面（游戏主页面）
+- `/room/:roomid/manage`：房间管理页面
 
 ## REST 接口说明
 
