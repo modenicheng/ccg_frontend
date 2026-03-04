@@ -202,6 +202,19 @@ function RoomPage() {
     });
   }, [answerOrderByUserId, onlinePlayers]);
 
+  const isCurrentPlayerInAnswerQueue = useMemo(() => {
+    if (userId === null) {
+      return false;
+    }
+
+    const inRoomStateQueue =
+      roomState?.answer_queue?.some((item) => item.player_id === userId) ??
+      false;
+    const inLocalOrder = typeof answerOrderByUserId[userId] === "number";
+
+    return inRoomStateQueue || inLocalOrder;
+  }, [answerOrderByUserId, roomState?.answer_queue, userId]);
+
   const handleBuzz = useCallback(() => {
     if (!isConnected) {
       console.debug("[buzz] skip: not connected");
@@ -249,6 +262,24 @@ function RoomPage() {
 
     void wsRef.current.sendJson(payload);
   }, [isConnected, getCalibratedNow, userId, isReady]);
+
+  const handleGameStart = useCallback(() => {
+    if (
+      !user?.isOwner ||
+      !wsRef.current?.isConnected() ||
+      roomState?.statusCode !== 0
+    ) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.GAME_START,
+      ts: Math.round(getCalibratedNow()),
+      data: {},
+    };
+
+    void wsRef.current.sendJson(payload);
+  }, [getCalibratedNow, roomState?.statusCode, user?.isOwner]);
 
   const handleLeaveRoom = useCallback(async () => {
     if (!roomId || userId === null) {
@@ -404,7 +435,6 @@ function RoomPage() {
         return;
       }
 
-
       const now = getCalibratedNow();
       // offset_ts可能为null，如果为null则使用消息的时间戳
       const offsetTs = controlData.offset_ts ?? message.ts;
@@ -513,13 +543,13 @@ function RoomPage() {
             applyRemoteProgress(pseudoMessage, true);
 
             // 同步播放状态
-            if (playbackStatus.play_state === 'playing') {
+            if (playbackStatus.play_state === "playing") {
               void audioPlayer.resume();
-            } else if (playbackStatus.play_state === 'paused') {
+            } else if (playbackStatus.play_state === "paused") {
               void audioPlayer.pause();
             }
           } catch (error) {
-            console.error('Failed to sync audio playback:', error);
+            console.error("Failed to sync audio playback:", error);
             // 音频同步失败，但继续其他初始化
           }
         }
@@ -695,12 +725,10 @@ function RoomPage() {
       if (newPlayer) {
         setOnlinePlayers((prev) => {
           // 检查玩家是否已存在
-          const playerExists = prev.some(p => p.id === newPlayer.id);
+          const playerExists = prev.some((p) => p.id === newPlayer.id);
           if (playerExists) {
             // 更新现有玩家信息
-            return prev.map(p => 
-              p.id === newPlayer.id ? newPlayer : p
-            );
+            return prev.map((p) => (p.id === newPlayer.id ? newPlayer : p));
           } else {
             // 添加新玩家
             return [...prev, newPlayer];
@@ -711,6 +739,37 @@ function RoomPage() {
         if (newPlayer.is_owner) {
           setRoomOwner(newPlayer.username);
         }
+      }
+    });
+
+    // 处理玩家离开事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.PLAYER_LEAVE;
+      ts: number;
+      data: {
+        id: number;
+        username: string;
+        is_owner: boolean;
+        online: boolean;
+      };
+    }>(GameEventId.PLAYER_LEAVE, (message) => {
+      const leftPlayer = message.data;
+      if (!leftPlayer) {
+        return;
+      }
+
+      setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
+      setAnswerOrderByUserId((prev) => {
+        if (!(leftPlayer.id in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[leftPlayer.id];
+        return next;
+      });
+
+      if (leftPlayer.is_owner) {
+        setRoomOwner("-");
       }
     });
 
@@ -741,6 +800,24 @@ function RoomPage() {
       const { seconds } = message.data;
       setCountdown(seconds);
     });
+
+    // 处理游戏开始事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.GAME_START;
+      ts: number;
+      data: Record<string, never>;
+    }>(GameEventId.GAME_START, () => {
+      const currentRoomState = gameStore.getState().roomState;
+      if (currentRoomState) {
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          status: "playing",
+          statusCode: 1,
+        });
+      }
+      setCountdown(null);
+      setIsReady(false);
+    });
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -758,11 +835,13 @@ function RoomPage() {
   }, [
     addAttemptOrder,
     applyRemoteProgress,
+    currentAudioUrl,
     roomId,
     setConnected,
     setRoomId,
     setUrl,
     setWsClient,
+    userId,
   ]);
 
   useEffect(() => {
@@ -1082,11 +1161,30 @@ function RoomPage() {
               </button>
               <div className="join w-full">
                 <div
-                  className="btn btn-primary btn-sm btn-soft join-item flex-1"
-                  onClick={() => {}}
+                  className={clsx("btn btn-sm btn-soft join-item flex-1", {
+                    "btn-primary": roomState?.statusCode === 0,
+                    "btn-warning": roomState?.statusCode !== 0,
+                  })}
+                  onClick={() => {
+                    if (roomState?.statusCode === 0) {
+                      handleGameStart();
+                      return;
+                    }
+                    skipConfirmDialogRef.current?.showModal();
+                  }}
                 >
-                  开始游戏
-                  {/* 切换房间状态，向后端发送 GAME_START 事件，禁止新玩家加入 */}
+                  {roomState?.statusCode === 0 ? (
+                    "开始游戏"
+                  ) : (
+                    <>
+                      <Icon
+                        icon="heroicons:chevron-double-right-20-solid"
+                        width={16}
+                        height={16}
+                      />
+                      下一轮
+                    </>
+                  )}
                 </div>
                 <div
                   className="btn btn-info btn-sm btn-soft join-item flex-1"
@@ -1094,17 +1192,6 @@ function RoomPage() {
                 >
                   <Icon icon="heroicons:scale" width={16} height={16} />
                   判分
-                </div>
-                <div
-                  className="btn btn-warning btn-sm btn-soft join-item flex-1"
-                  onClick={() => skipConfirmDialogRef.current?.showModal()}
-                >
-                  <Icon
-                    icon="heroicons:chevron-double-right-20-solid"
-                    width={16}
-                    height={16}
-                  />
-                  下一轮
                 </div>
               </div>
               <div
@@ -1133,11 +1220,11 @@ function RoomPage() {
             <div className="join">
               <button
                 type="button"
-                className={`btn btn-sm join-item ${isReady ? 'btn-success' : 'btn-primary'}`}
+                className={`btn btn-sm join-item ${isReady ? "btn-success" : "btn-primary"}`}
                 onClick={handleReady}
                 disabled={!isConnected}
               >
-                {isReady ? '取消准备' : '准备'}
+                {isReady ? "取消准备" : "准备"}
               </button>
               {countdown !== null && (
                 <div className="text-center py-2 bg-base-200 rounded-lg">
@@ -1161,10 +1248,10 @@ function RoomPage() {
           <button
             type="button"
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
-              "btn-disabled": !isConnected,
+              "btn-disabled": !isConnected || isCurrentPlayerInAnswerQueue,
               "btn-active": isBuzzHotkeyActive,
             })}
-            disabled={!isConnected}
+            disabled={!isConnected || isCurrentPlayerInAnswerQueue}
             onClick={handleBuzz}
           >
             <h2 className="text-3xl">抢答！</h2>
