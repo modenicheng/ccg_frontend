@@ -167,6 +167,7 @@ function RoomPage() {
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
+  const isPlaybackStateMissing = roomState?.playback_status === null;
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -312,10 +313,13 @@ function RoomPage() {
   );
 
   const handleTogglePlayPause = useCallback(() => {
+    if (isPlaybackStateMissing) {
+      return;
+    }
     const nextEvent =
       audioState === "running" ? GameEventId.PAUSE : GameEventId.PLAY;
     void sendPlaybackControl(nextEvent);
-  }, [audioState, sendPlaybackControl]);
+  }, [audioState, isPlaybackStateMissing, sendPlaybackControl]);
 
   const handleJudgeSubmit = useCallback(() => {
     if (!wsRef.current?.isConnected() || !user?.isOwner) {
@@ -1050,24 +1054,32 @@ function RoomPage() {
         {user?.isOwner ? (
           <div className="card shadow-sm min-w-xs">
             <div className="card-body">
-              <div
+              <button
+                type="button"
                 className={clsx("btn btn-sm btn-soft", {
                   "btn-success": audioState !== "running",
                   "btn-warning": audioState === "running",
                 })}
+                disabled={isPlaybackStateMissing}
                 onClick={handleTogglePlayPause}
               >
-                <Icon
-                  icon={
-                    audioState === "running"
-                      ? "heroicons:pause"
-                      : "heroicons:play"
-                  }
-                  width={16}
-                  height={16}
-                />
-                {audioState === "running" ? "暂停" : "播放"}
-              </div>
+                {isPlaybackStateMissing ? (
+                  "暂无播放状态"
+                ) : (
+                  <>
+                    <Icon
+                      icon={
+                        audioState === "running"
+                          ? "heroicons:pause"
+                          : "heroicons:play"
+                      }
+                      width={16}
+                      height={16}
+                    />
+                    {audioState === "running" ? "暂停" : "播放"}
+                  </>
+                )}
+              </button>
               <div className="join w-full">
                 <div
                   className="btn btn-primary btn-sm btn-soft join-item flex-1"
@@ -1113,16 +1125,15 @@ function RoomPage() {
                 width="24"
                 height="24"
               />
-              房间信息
+              {roomState?.roomId ? `${roomState.title}` : "房间信息"}
             </h2>
             <div className="divider m-0"></div>
-            <p className="truncate">标题： {roomState?.title ?? "-"}</p>
             <p>房主： {roomOwner}</p>
             <div className="divider m-0"></div>
-            <div className="flex flex-col gap-2">
+            <div className="join">
               <button
                 type="button"
-                className={`btn btn-sm ${isReady ? 'btn-success' : 'btn-primary'}`}
+                className={`btn btn-sm join-item ${isReady ? 'btn-success' : 'btn-primary'}`}
                 onClick={handleReady}
                 disabled={!isConnected}
               >
@@ -1136,10 +1147,10 @@ function RoomPage() {
               )}
               <button
                 type="button"
-                className="btn btn-sm btn-error"
+                className="btn btn-sm btn-error join-item"
                 onClick={handleLeaveRoom}
               >
-                退出房间
+                退出
               </button>
             </div>
           </div>
