@@ -61,9 +61,12 @@ function TagList({
   return (
     <div className={clsx("flex flex-col gap-2", className)}>
       <div className="flex gap-2 flex-wrap justify-start items-center">
-        {tags.map((tag) => {
+        {tags.map((tag, index) => {
           return (
-            <div key={tag.id} className="flex flex-col gap-1">
+            <div
+              key={`${tag.id}-${tag.name}-${index}`}
+              className="flex flex-col gap-1"
+            >
               {/** tag.canClose 默认为 true；showRemoveButton 是全局开关 */}
               <div
                 className={clsx(

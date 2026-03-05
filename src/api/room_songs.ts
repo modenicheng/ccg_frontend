@@ -166,6 +166,17 @@ export async function clearRoomSongs(roomId: string): Promise<RoomSongsListRespo
   };
 }
 
+export async function shuffleRoomSongs(roomId: string): Promise<RoomSongsListResponse> {
+  const { data } = await http.post<BackendRoomSongsListResponse>(
+    `/api/rooms/${encodeURIComponent(roomId)}/songs/shuffle`,
+  );
+  return {
+    room_id: data.room_id,
+    list: data.list.map(mapRoomSong),
+    total: data.total,
+  };
+}
+
 export async function getRoomSongDetail(
   roomId: string,
   songId: number,

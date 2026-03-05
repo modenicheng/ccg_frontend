@@ -25,7 +25,7 @@ export const GameEventId = {
 
   PLAYER_READY: 30,
   GAME_START: 31,
-  COUNTDOWN: 32,
+  ROUND_START: 32,
   ATTEMPT_ANSWER: 33,
   YOUR_TURN: 34,
   SUBMIT_ANSWER: 35,

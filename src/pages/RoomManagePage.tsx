@@ -41,6 +41,7 @@ import {
   addSongsToRoom,
   removeSongsFromRoom,
   clearRoomSongs,
+  shuffleRoomSongs,
   type RoomSong,
 } from "../api/room_songs";
 
@@ -180,6 +181,7 @@ const RoomManagePage = () => {
   const [roomSongsError, setRoomSongsError] = useState<string | null>(null);
   const [roomSongsSuccess, setRoomSongsSuccess] = useState<string | null>(null);
   const [selectedRoomSongIds, setSelectedRoomSongIds] = useState<number[]>([]);
+  const [isShufflingRoomSongs, setIsShufflingRoomSongs] = useState(false);
   const roomSongsPageSize = 10;
 
   // 玩家管理状态
@@ -436,6 +438,17 @@ const RoomManagePage = () => {
       })),
     [editingTagIds, manageTags],
   );
+
+  const uniquePlayers = useMemo(() => {
+    const seen = new Set<number>();
+    return players.filter((player) => {
+      if (seen.has(player.id)) {
+        return false;
+      }
+      seen.add(player.id);
+      return true;
+    });
+  }, [players]);
 
   const handleOpenManageDialog = async () => {
     manageDialogRef.current?.showModal();
@@ -1019,6 +1032,24 @@ const RoomManagePage = () => {
     }
   };
 
+  const handleShuffleRoomSongs = async () => {
+    if (!roomid) return;
+    setIsShufflingRoomSongs(true);
+    setRoomSongsError(null);
+    setRoomSongsSuccess(null);
+    try {
+      await shuffleRoomSongs(roomid);
+      setRoomSongsSuccess("房间歌曲已随机打乱");
+      setSelectedRoomSongIds([]);
+      setRoomSongsPage(1);
+      await loadRoomSongs(1);
+    } catch (err) {
+      setRoomSongsError((err as Error).message || "打乱房间歌曲失败");
+    } finally {
+      setIsShufflingRoomSongs(false);
+    }
+  };
+
   const handleKickUser = async (userId: number) => {
     if (!roomid || !wsClient) return;
     setIsKicking(userId);
@@ -1155,11 +1186,11 @@ const RoomManagePage = () => {
               <div>
                 <h3 className="text-sm font-semibold mb-2">TagGroup 选择</h3>
                 <div className="flex flex-wrap gap-2">
-                  {tagGroups.map((group) => {
+                  {tagGroups.map((group, index) => {
                     const selected = selectedTagGroupIds.includes(group.id);
                     return (
                       <button
-                        key={group.id}
+                        key={`${group.id}-${group.name}-${index}`}
                         type="button"
                         className={`btn btn-sm ${selected ? "btn-primary" : "btn-soft"}`}
                         onClick={() => toggleTagGroup(group.id)}
@@ -1173,8 +1204,8 @@ const RoomManagePage = () => {
                     );
                   })}
                   {tagGroups.length === 0 ? (
-                    <div className="alert alert-warning alert-soft py-2">
-                      <span>还没有可选 TagGroup，请先在弹窗里创建。</span>
+                    <div className="badge badge-warning badge-soft py-3">
+                      还没有可选 TagGroup，请先在弹窗里创建。
                     </div>
                   ) : null}
                 </div>
@@ -1186,17 +1217,6 @@ const RoomManagePage = () => {
                 <p className="text-sm opacity-70 mb-3">
                   管理当前房间的歌曲队列。可以从歌单绑定歌曲，或添加/删除单曲。
                 </p>
-
-                {roomSongsError && (
-                  <div className="alert alert-soft alert-error mb-3">
-                    <span>{roomSongsError}</span>
-                  </div>
-                )}
-                {roomSongsSuccess && (
-                  <div className="alert alert-soft alert-success mb-3">
-                    <span>{roomSongsSuccess}</span>
-                  </div>
-                )}
 
                 <div className="card bg-base-200">
                   <div className="card-body p-4">
@@ -1240,6 +1260,14 @@ const RoomManagePage = () => {
                         >
                           清空全部
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-info btn-outline"
+                          onClick={() => void handleShuffleRoomSongs()}
+                          disabled={roomSongs.length === 0 || isShufflingRoomSongs}
+                        >
+                          {isShufflingRoomSongs ? "打乱中..." : "手动打乱"}
+                        </button>
                       </div>
                     </div>
 
@@ -1280,9 +1308,9 @@ const RoomManagePage = () => {
                               </tr>
                             </thead>
                             <tbody>
-                              {roomSongs?.map((roomSong) => (
+                              {roomSongs?.map((roomSong, index) => (
                                 <tr
-                                  key={`${roomSong.room_id}-${roomSong.song_id}`}
+                                  key={`${roomSong.room_id}-${roomSong.song_id}-${roomSong.song_order ?? "na"}-${index}`}
                                 >
                                   <td>
                                     <input
@@ -1380,13 +1408,6 @@ const RoomManagePage = () => {
                 </div>
               </div>
 
-              {error ? (
-                <div className="alert  alert-soft alert-error">{error}</div>
-              ) : null}
-              {success ? (
-                <div className="alert alert-success alert-soft">{success}</div>
-              ) : null}
-
               <div className="flex flex-col sm:flex-row gap-2 justify-end">
                 <button
                   className="btn btn-primary"
@@ -1427,9 +1448,9 @@ const RoomManagePage = () => {
                 <div className="flex flex-wrap gap-1.5">
                   {tagGroups
                     .filter((group) => selectedTagGroupIds.includes(group.id))
-                    .map((group) => (
+                    .map((group, index) => (
                       <span
-                        key={group.id}
+                        key={`${group.id}-${group.name}-${index}`}
                         className="badge badge-primary badge-soft"
                       >
                         {group.name}
@@ -1445,19 +1466,12 @@ const RoomManagePage = () => {
 
               <div className="text-sm">
                 <p className="opacity-70 mb-1">玩家列表</p>
-                {kickError && (
-                  <div className="alert alert-soft alert-error mb-2">
-                    <span>{kickError}</span>
-                  </div>
-                )}
-                {kickSuccess && (
-                  <div className="alert alert-soft alert-success mb-2">
-                    <span>{kickSuccess}</span>
-                  </div>
-                )}
                 <div className="space-y-2">
-                  {players.map((player) => (
-                    <div key={player.id} className="flex items-center justify-between">
+                  {uniquePlayers.map((player, index) => (
+                    <div
+                      key={`${player.id}-${player.username}-${index}`}
+                      className="flex items-center justify-between"
+                    >
                       <div className="flex items-center gap-2">
                         <span>{player.username}</span>
                         {player.is_owner && (
@@ -1476,7 +1490,7 @@ const RoomManagePage = () => {
                       )}
                     </div>
                   ))}
-                  {players.length === 0 ? (
+                  {uniquePlayers.length === 0 ? (
                     <span className="text-base-content/60">暂无玩家</span>
                   ) : null}
                 </div>
@@ -1522,8 +1536,11 @@ const RoomManagePage = () => {
 
                   <div className="divider my-1">现有 Tags</div>
                   <div className="flex flex-wrap gap-2">
-                    {manageTags.map((tag) => (
-                      <div key={tag.id} className="badge badge-lg gap-0 pr-0">
+                    {manageTags.map((tag, index) => (
+                      <div
+                        key={`${tag.id}-${tag.name}-${index}`}
+                        className="badge badge-lg gap-0 pr-0"
+                      >
                         <span className="mr-1">{tag.name}</span>
                         <button
                           type="button"
@@ -1630,15 +1647,15 @@ const RoomManagePage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {manageTagGroups.map((group) => (
-                      <tr key={group.id}>
+                    {manageTagGroups.map((group, index) => (
+                      <tr key={`${group.id}-${group.name}-${index}`}>
                         <td>{group.name}</td>
                         <td>{group.description || "-"}</td>
                         <td>
                           <div className="flex flex-wrap gap-1">
-                            {group.tags.map((tag) => (
+                            {group.tags.map((tag, tagIndex) => (
                               <span
-                                key={tag.id}
+                                key={`${group.id}-${tag.id}-${tag.name}-${tagIndex}`}
                                 className="badge badge-outline badge-sm"
                               >
                                 {tag.name}
@@ -1998,8 +2015,8 @@ const RoomManagePage = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {songs.map((song) => (
-                              <tr key={song.id}>
+                            {songs.map((song, index) => (
+                              <tr key={`${song.id}-${song.title ?? "untitled"}-${index}`}>
                                 <td>{song.id}</td>
                                 <td>{song.title || "-"}</td>
                                 <td>{song.artist || "-"}</td>
@@ -2218,8 +2235,10 @@ const RoomManagePage = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {songlists.map((songlist) => (
-                              <tr key={songlist.id}>
+                            {songlists.map((songlist, index) => (
+                              <tr
+                                key={`${songlist.id}-${songlist.title ?? "untitled"}-${index}`}
+                              >
                                 <td>{songlist.id}</td>
                                 <td>{songlist.title || "-"}</td>
                                 <td>{songlist.platform || "-"}</td>
@@ -2312,17 +2331,6 @@ const RoomManagePage = () => {
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {songManageError && (
-                <div className="alert alert-soft alert-error mt-4">
-                  <span>{songManageError}</span>
-                </div>
-              )}
-              {songManageSuccess && (
-                <div className="alert alert-soft alert-success mt-4">
-                  <span>{songManageSuccess}</span>
                 </div>
               )}
             </>
@@ -2466,6 +2474,48 @@ const RoomManagePage = () => {
           {manageSuccess ? (
             <div className="alert alert-soft alert-success">
               <span>{manageSuccess}</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+      {(error || success) && (
+        <div className="toast toast-top toast-center z-50">
+          {error ? (
+            <div className="alert alert-soft alert-error">
+              <span>{error}</span>
+            </div>
+          ) : null}
+          {success ? (
+            <div className="alert alert-soft alert-success">
+              <span>{success}</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+      {(roomSongsError || roomSongsSuccess) && (
+        <div className="toast toast-top toast-center z-50">
+          {roomSongsError ? (
+            <div className="alert alert-soft alert-error">
+              <span>{roomSongsError}</span>
+            </div>
+          ) : null}
+          {roomSongsSuccess ? (
+            <div className="alert alert-soft alert-success">
+              <span>{roomSongsSuccess}</span>
+            </div>
+          ) : null}
+        </div>
+      )}
+      {(kickError || kickSuccess) && (
+        <div className="toast toast-top toast-center z-50">
+          {kickError ? (
+            <div className="alert alert-soft alert-error">
+              <span>{kickError}</span>
+            </div>
+          ) : null}
+          {kickSuccess ? (
+            <div className="alert alert-soft alert-success">
+              <span>{kickSuccess}</span>
             </div>
           ) : null}
         </div>

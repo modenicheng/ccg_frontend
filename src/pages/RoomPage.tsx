@@ -18,6 +18,7 @@ import type {
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  RoundStartMessage,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -30,7 +31,7 @@ const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 40;
 const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
-const CANVAS_INIT_DELAY_MS = 800;
+const CANVAS_INIT_DELAY_MS = 0;
 
 let domProgressPercent = 0;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
@@ -138,8 +139,8 @@ function RoomPage() {
   >([]);
 
   // 准备和倒计时状态
-  const [isReady, setIsReady] = useState<boolean>(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // const [isReady, setIsReady] = useState<boolean>(false);
+  // const [countdown, setCountdown] = useState<number | null>(null);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -246,22 +247,22 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [addAttemptOrder, getCalibratedNow, isConnected, userId]);
 
-  const handleReady = useCallback(() => {
-    if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
-      return;
-    }
+  // const handleReady = useCallback(() => {
+  //   if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
+  //     return;
+  //   }
 
-    const payload = {
-      event: GameEventId.PLAYER_READY,
-      ts: Math.round(getCalibratedNow()),
-      data: {
-        user_id: userId,
-        ready: !isReady,
-      },
-    };
+  //   const payload = {
+  //     event: GameEventId.PLAYER_READY,
+  //     ts: Math.round(getCalibratedNow()),
+  //     data: {
+  //       user_id: userId,
+  //       ready: !isReady,
+  //     },
+  //   };
 
-    void wsRef.current.sendJson(payload);
-  }, [isConnected, getCalibratedNow, userId, isReady]);
+  //   void wsRef.current.sendJson(payload);
+  // }, [isConnected, getCalibratedNow, userId, isReady]);
 
   const handleGameStart = useCallback(() => {
     if (
@@ -281,34 +282,34 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [getCalibratedNow, roomState?.statusCode, user?.isOwner]);
 
-  const handleLeaveRoom = useCallback(async () => {
-    if (!roomId || userId === null) {
-      return;
-    }
+  // const handleLeaveRoom = useCallback(async () => {
+  //   if (!roomId || userId === null) {
+  //     return;
+  //   }
 
-    try {
-      // 发送退出房间事件
-      if (wsRef.current?.isConnected()) {
-        await wsRef.current.sendJson({
-          event: 16, // PLAYER_LEAVE
-          data: { user_id: userId },
-        });
-      }
+  //   try {
+  //     // 发送退出房间事件
+  //     if (wsRef.current?.isConnected()) {
+  //       await wsRef.current.sendJson({
+  //         event: 16, // PLAYER_LEAVE
+  //         data: { user_id: userId },
+  //       });
+  //     }
 
-      // 关闭WebSocket连接
-      wsRef.current?.close();
+  //     // 关闭WebSocket连接
+  //     wsRef.current?.close();
 
-      // 清除本地存储的房间相关信息
-      sessionStorage.removeItem(`ccg-room-token:${roomId}`);
-      sessionStorage.removeItem(`ccg-room-user-id:${roomId}`);
-      document.cookie = `ccg-room-user-id:${roomId}=; Max-Age=0`;
+  //     // 清除本地存储的房间相关信息
+  //     sessionStorage.removeItem(`ccg-room-token:${roomId}`);
+  //     sessionStorage.removeItem(`ccg-room-user-id:${roomId}`);
+  //     document.cookie = `ccg-room-user-id:${roomId}=; Max-Age=0`;
 
-      // 导航回首页
-      navigate("/");
-    } catch (error) {
-      console.error("退出房间失败:", error);
-    }
-  }, [roomId, userId, navigate]);
+  //     // 导航回首页
+  //     navigate("/");
+  //   } catch (error) {
+  //     console.error("退出房间失败:", error);
+  //   }
+  // }, [roomId, userId, navigate]);
 
   const sendPlaybackControl = useCallback(
     async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
@@ -334,13 +335,13 @@ function RoomPage() {
         data: {
           progress_ms: progressMs,
           offset_ts: calibratedNow,
-          audio_url: SYNC_AUDIO_URL,
+          audio_url: currentAudioUrl || SYNC_AUDIO_URL,
         },
       };
 
       await wsRef.current.sendJson(payload);
     },
-    [getCalibratedNow, user?.isOwner],
+    [getCalibratedNow, user?.isOwner, currentAudioUrl],
   );
 
   const handleTogglePlayPause = useCallback(() => {
@@ -774,32 +775,32 @@ function RoomPage() {
     });
 
     // 处理玩家准备事件
-    wsRef.current.onJsonEvent<{
-      event: typeof GameEventId.PLAYER_READY;
-      ts: number;
-      data: {
-        user_id: number;
-        ready: boolean;
-      };
-    }>(GameEventId.PLAYER_READY, (message) => {
-      const { user_id, ready } = message.data;
-      if (user_id === userId) {
-        setIsReady(ready);
-      }
-    });
+    // wsRef.current.onJsonEvent<{
+    //   event: typeof GameEventId.PLAYER_READY;
+    //   ts: number;
+    //   data: {
+    //     user_id: number;
+    //     ready: boolean;
+    //   };
+    // }>(GameEventId.PLAYER_READY, (message) => {
+    //   const { user_id, ready } = message.data;
+    //   if (user_id === userId) {
+    //     // setIsReady(ready);
+    //   }
+    // });
 
-    // 处理倒计时事件
-    wsRef.current.onJsonEvent<{
-      event: typeof GameEventId.COUNTDOWN;
-      ts: number;
-      data: {
-        seconds: number;
-        all_ready: boolean;
-      };
-    }>(GameEventId.COUNTDOWN, (message) => {
-      const { seconds } = message.data;
-      setCountdown(seconds);
-    });
+    // // 处理倒计时事件
+    // wsRef.current.onJsonEvent<{
+    //   event: typeof GameEventId.COUNTDOWN;
+    //   ts: number;
+    //   data: {
+    //     seconds: number;
+    //     all_ready: boolean;
+    //   };
+    // }>(GameEventId.COUNTDOWN, (message) => {
+    //   // const { seconds } = message.data;
+    //   // setCountdown(seconds);
+    // });
 
     // 处理游戏开始事件
     wsRef.current.onJsonEvent<{
@@ -815,9 +816,50 @@ function RoomPage() {
           statusCode: 1,
         });
       }
-      setCountdown(null);
-      setIsReady(false);
+      // setCountdown(null);
+      // setIsReady(false);
     });
+    
+    // 处理回合开始事件
+    wsRef.current.onJsonEvent<RoundStartMessage>(
+      GameEventId.ROUND_START,
+      async (message) => {
+        const roundData = message.data;
+        
+        // 1. 切换到新音频URL（如果提供）
+        if (roundData.audio_url && roundData.audio_url !== currentAudioUrl) {
+          try {
+            await audioRef.current?.preload(roundData.audio_url);
+            await audioRef.current?.playUrlAsStream(roundData.audio_url, false);
+            setCurrentAudioUrl(roundData.audio_url);
+          } catch (error) {
+            console.error("Failed to load audio for round start:", error);
+          }
+        }
+        
+        // 2. 设置起始播放位置
+        if (roundData.start_pertent > 0 && audioRef.current) {
+          const duration = audioRef.current.durationMs;
+          if (duration > 0) {
+            const startMs = duration * roundData.start_pertent;
+            audioRef.current.progressMs = startMs;
+          }
+        }
+        
+        // 3. 清除抢答队列状态
+        setAnswerOrderByUserId({});
+        
+        // 4. 隐藏判分界面和曲目信息
+        setIsJudging(false);
+        setCurrentSong(null);
+        
+        // 5. 可选：更新回合索引到状态存储（如果需要显示）
+        // gameStore.getState().setRoundIndex(roundData.round_index);
+        
+        console.log(`Round ${roundData.round_index} started`, roundData);
+      }
+    );
+    
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -1203,7 +1245,7 @@ function RoomPage() {
             </div>
           </div>
         ) : null}
-        <div className="card shadow-sm max-w-sm">
+        <div className="card shadow-sm max-w-sm min-w-3xs">
           <div className="card-body">
             <h2 className="text-lg font-semibold flex items-center">
               <Icon
@@ -1215,12 +1257,12 @@ function RoomPage() {
               {roomState?.roomId ? `${roomState.title}` : "房间信息"}
             </h2>
             <div className="divider m-0"></div>
-            <p>房主： {roomOwner}</p>
-            <div className="divider m-0"></div>
-            <div className="join">
+            <div>房主： {roomOwner}</div>
+            <div className="text-sm ">房间ID： {roomId}</div>
+            {/* <div className="join w-full">
               <button
                 type="button"
-                className={`btn btn-sm join-item ${isReady ? "btn-success" : "btn-primary"}`}
+                className={`btn btn-soft btn-sm join-item flex-1 ${isReady ? "btn-success" : "btn-primary"}`}
                 onClick={handleReady}
                 disabled={!isConnected}
               >
@@ -1234,12 +1276,12 @@ function RoomPage() {
               )}
               <button
                 type="button"
-                className="btn btn-sm btn-error join-item"
+                className="btn btn-soft btn-sm btn-error join-item flex-1"
                 onClick={handleLeaveRoom}
               >
                 退出
               </button>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>

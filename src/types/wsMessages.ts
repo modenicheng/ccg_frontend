@@ -91,6 +91,18 @@ export interface SeekMessage {
 // 播放控制消息联合类型
 export type PlayControlMessage = PlayMessage | PauseMessage | SeekMessage;
 
+export interface RoundStartData {
+  round_index: number;
+  audio_url: string | null;
+  start_pertent: number;  // 注意：后端字段名可能为拼写错误，暂时保持一致
+}
+
+export interface RoundStartMessage {
+  event: typeof GameEventId.ROUND_START;
+  ts: number;
+  data: RoundStartData;
+}
+
 export interface AttemptAnswerMessageData {
   offset_ts: number;
   user_id: number;
