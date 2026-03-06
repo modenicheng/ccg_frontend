@@ -382,24 +382,18 @@ function RoomPage() {
     confirmAnswerDialogRef.current?.close();
   }, [selectedTags, selectedDescriptions, getCalibratedNow, user?.isOwner]);
 
-  const handleJudgeSkip = useCallback(() => {
+  const handleSkipRound = useCallback(() => {
     if (!wsRef.current?.isConnected() || !user?.isOwner) {
       return;
     }
 
     const payload = {
-      event: GameEventId.JUDGE_SUBMIT,
+      event: GameEventId.SKIP_ROUND,
       ts: Math.round(getCalibratedNow()),
-      data: {
-        correct_tags: [],
-        correct_description_ids: [],
-        new_correct_descriptions: [],
-        skip_scoring: true,
-      },
+      data: {},
     };
 
     void wsRef.current.sendJson(payload);
-    judgingDialogRef.current?.close();
     skipConfirmDialogRef.current?.close();
   }, [getCalibratedNow, user?.isOwner]);
 
@@ -438,7 +432,10 @@ function RoomPage() {
 
       const now = getCalibratedNow();
       // offset_ts可能为null，如果为null则使用消息的时间戳
-      const offsetTs = controlData.offset_ts ?? message.ts;
+      const offsetTs =
+        typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
+          ? controlData.offset_ts
+          : message.ts;
       const elapsed = Math.max(0, now - offsetTs);
       const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
       const localMs = audioRef.current.currentTimeMs;
@@ -819,13 +816,13 @@ function RoomPage() {
       // setCountdown(null);
       // setIsReady(false);
     });
-    
+
     // 处理回合开始事件
     wsRef.current.onJsonEvent<RoundStartMessage>(
       GameEventId.ROUND_START,
       async (message) => {
         const roundData = message.data;
-        
+
         // 1. 切换到新音频URL（如果提供）
         if (roundData.audio_url && roundData.audio_url !== currentAudioUrl) {
           try {
@@ -836,7 +833,7 @@ function RoomPage() {
             console.error("Failed to load audio for round start:", error);
           }
         }
-        
+
         // 2. 设置起始播放位置
         if (roundData.start_pertent > 0 && audioRef.current) {
           const duration = audioRef.current.durationMs;
@@ -844,22 +841,24 @@ function RoomPage() {
             const startMs = duration * roundData.start_pertent;
             audioRef.current.progressMs = startMs;
           }
+        } else if (audioRef.current) {
+          audioRef.current.progressMs = 0;
         }
-        
+
         // 3. 清除抢答队列状态
         setAnswerOrderByUserId({});
-        
+
         // 4. 隐藏判分界面和曲目信息
         setIsJudging(false);
         setCurrentSong(null);
-        
+
         // 5. 可选：更新回合索引到状态存储（如果需要显示）
         // gameStore.getState().setRoundIndex(roundData.round_index);
-        
+
         console.log(`Round ${roundData.round_index} started`, roundData);
-      }
+      },
     );
-    
+
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -1567,9 +1566,9 @@ function RoomPage() {
       {/* 跳过本题确认弹窗 */}
       <dialog ref={skipConfirmDialogRef} className="modal">
         <div className="modal-box max-w-md">
-          <h3 className="font-bold text-lg">确认跳过本题</h3>
+          <h3 className="font-bold text-lg">确认进入下一轮</h3>
           <p className="py-4">
-            确定要跳过本题吗？跳过之后将不会对本题进行评分。
+            确定立即进入下一轮吗？当前抢答队列会被清空。
           </p>
           <div className="flex justify-end gap-3">
             <button
@@ -1582,9 +1581,9 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-warning"
-              onClick={handleJudgeSkip}
+              onClick={handleSkipRound}
             >
-              确认跳过
+              确认下一轮
             </button>
           </div>
         </div>

@@ -36,6 +36,7 @@ export const GameEventId = {
   JUDGING: 40,
   JUDGE_SUBMIT: 41,
   SCORE_UPDATE: 42,
+  SKIP_ROUND: 43,
 } as const;
 
 export type GameEventId = typeof GameEventId[keyof typeof GameEventId];
