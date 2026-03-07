@@ -49,6 +49,7 @@ export interface RoomStateData {
   room_id: string;
   title: string | null;
   status: 0 | 1 | 2; // 0=waiting, 1=playing, 2=ended
+  round_state: 0 | 1 | 2 | 3 | 4; // 0=PENDING, 1=PLAYING_AUDIO, 2=ANSWERING, 3=JUDGING, 4=COMPLETED
   song_start_range_percent: number | null;
   players: WsPlayer[];
   tag_groups: WsTagGroup[];
@@ -145,6 +146,17 @@ export interface ScoreUpdateMessage {
   event: typeof GameEventId.SCORE_UPDATE;
   ts: number;
   data: ScoreUpdateMessageData;
+}
+
+export interface RoundStateUpdateData {
+  round_state: 0 | 1 | 2 | 3 | 4; // 0=PENDING, 1=PLAYING_AUDIO, 2=ANSWERING, 3=JUDGING, 4=COMPLETED
+  round_state_name: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+}
+
+export interface RoundStateUpdateMessage {
+  event: typeof GameEventId.ROUND_STATE_UPDATE;
+  ts: number;
+  data: RoundStateUpdateData;
 }
 
 // 类型守卫函数

@@ -32,6 +32,8 @@ export const gameStore = create<GameState>((set, get) => ({
   roomState: undefined,
   isHost: false,
   scores: [],
+  roundState: "PENDING",
+  roundStateCode: 0,
 
   // Action to set the WebSocket instance
   setWS: (ws: WS) => {
@@ -53,6 +55,11 @@ export const gameStore = create<GameState>((set, get) => ({
     set({ scores });
   },
 
+  // Action to set round state
+  setRoundState: (roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED", roundStateCode: 0 | 1 | 2 | 3 | 4) => {
+    set({ roundState, roundStateCode });
+  },
+
   // Action to refresh room state
   refreshRoomState: async () => {
     const { roomState } = get();
@@ -62,6 +69,8 @@ export const gameStore = create<GameState>((set, get) => ({
       const data = await getRoomInfo(roomState.roomId);
       // Map RoomInfoResponse (simplified) to RoomState
       const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
+      const roundState = data.roundState || "PENDING";
+      const roundStateCode = data.roundStateCode || 0;
       const nextRoomState: RoomState = {
         // Keep existing full objects
         ...roomState,
@@ -70,6 +79,8 @@ export const gameStore = create<GameState>((set, get) => ({
         title: data.title ?? "",
         status: data.status,
         statusCode,
+        roundState,
+        roundStateCode,
         description: data.description ?? null,
         hostPlayerId: data.hostPlayerId,
         playersSimple: data.players,
@@ -83,7 +94,11 @@ export const gameStore = create<GameState>((set, get) => ({
         // players and tag_groups keep existing (full objects)
       };
 
-      set({ roomState: nextRoomState });
+      set({ 
+        roomState: nextRoomState,
+        roundState,
+        roundStateCode
+      });
     } catch (error) {
       console.error('Failed to refresh room state:', error);
     }

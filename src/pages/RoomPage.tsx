@@ -564,6 +564,10 @@ function RoomPage() {
           status: mapStatusCodeToStatus(payload.status),
           statusCode: payload.status,
 
+          // 回合状态
+          roundState: typeof payload.round_state === "string" ? payload.round_state : "PENDING",
+          roundStateCode: typeof payload.round_state === "number" ? payload.round_state : 0,
+
           // 播放相关
           song_start_range_percent: payload.song_start_range_percent,
 
@@ -1005,6 +1009,20 @@ function RoomPage() {
       },
     );
 
+    // 处理回合状态更新事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.ROUND_STATE_UPDATE;
+      ts: number;
+      data: {
+        round_state: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+        round_state_code: 0 | 1 | 2 | 3 | 4;
+      };
+    }>(GameEventId.ROUND_STATE_UPDATE, (message) => {
+      const { round_state, round_state_code } = message.data;
+      gameStore.getState().setRoundState(round_state, round_state_code);
+      console.log(`Round state updated: ${round_state} (code: ${round_state_code})`);
+    });
+
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -1404,6 +1422,18 @@ function RoomPage() {
             <div className="divider m-0"></div>
             <div>房主： {roomOwner}</div>
             <div className="text-sm ">房间ID： {roomId}</div>
+            <div className="text-sm mt-2">
+              回合状态： 
+              <span className={clsx("px-2 py-0.5 rounded text-xs font-medium", {
+                "bg-blue-100 text-blue-800": gameStore.getState().roundState === "PENDING",
+                "bg-green-100 text-green-800": gameStore.getState().roundState === "PLAYING_AUDIO",
+                "bg-yellow-100 text-yellow-800": gameStore.getState().roundState === "ANSWERING",
+                "bg-purple-100 text-purple-800": gameStore.getState().roundState === "JUDGING",
+                "bg-gray-100 text-gray-800": gameStore.getState().roundState === "COMPLETED",
+              })}>
+                {gameStore.getState().roundState}
+              </span>
+            </div>
             <div className="join w-full mt-4">
               <button
                 type="button"

@@ -38,6 +38,10 @@ export interface RoomState {
   status: "waiting" | "playing" | "ended"; // 转换后的状态，对应后端的0,1,2
   statusCode: 0 | 1 | 2; // 原始状态码
 
+  // 回合状态
+  roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+  roundStateCode: 0 | 1 | 2 | 3 | 4; // 原始回合状态码
+
   // 播放相关
   song_start_range_percent: number | null;
 
@@ -77,11 +81,14 @@ export interface GameState {
   isHost: boolean;
   scores: PlayerScore[];
   audioManager?: unknown;
+  roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+  roundStateCode: 0 | 1 | 2 | 3 | 4;
 
   setWS: (ws: import("../wsClient").WS) => void;
   setRoomState: (roomState: RoomState) => void;
   setIsHost: (isHost: boolean) => void;
   setScores: (scores: PlayerScore[]) => void;
+  setRoundState: (roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED", roundStateCode: 0 | 1 | 2 | 3 | 4) => void;
   refreshRoomState: () => Promise<void>;
 }
 
