@@ -103,6 +103,9 @@ function RoomPage() {
     (Number.isFinite(fallbackUserIdFromCookie)
       ? fallbackUserIdFromCookie
       : null);
+  
+  // 简化身份鉴权：仅判定是否为房主
+  const isOwner = user?.isOwner || false;
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
   const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
@@ -117,6 +120,7 @@ function RoomPage() {
     Record<number, number | null>
   >({});
   const [isJudging, setIsJudging] = useState<boolean>(false);
+  const [description, setDescription] = useState<string>("");
   const [currentSong, setCurrentSong] = useState<{
     title: string;
     artist: string;
@@ -138,9 +142,25 @@ function RoomPage() {
     Array<{ id: number; username: string; description: string }>
   >([]);
 
+  // 玩家作答情况状态
+  const [playerAnswers, setPlayerAnswers] = useState<
+    Array<{
+      playerId: number;
+      username: string;
+      answers: Record<number, number | null>; // tagGroupId -> tagId
+      description: string;
+      order: number;
+    }>
+  >([]);
+
+  // 答题弹窗状态
+  const [isAnswerModalOpen, setIsAnswerModalOpen] = useState<boolean>(false);
+  const [isAnswerModalMinimized, setIsAnswerModalMinimized] = useState<boolean>(false);
+  const answerModalRef = useRef<HTMLDialogElement | null>(null);
+
   // 准备和倒计时状态
-  // const [isReady, setIsReady] = useState<boolean>(false);
-  // const [countdown, setCountdown] = useState<number | null>(null);
+  const [isReady, setIsReady] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -164,6 +184,8 @@ function RoomPage() {
   const judgingDialogRef = useRef<HTMLDialogElement | null>(null);
   const skipConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const confirmAnswerDialogRef = useRef<HTMLDialogElement | null>(null);
+  const removePlayerDialogRef = useRef<HTMLDialogElement | null>(null);
+  const [playerToRemove, setPlayerToRemove] = useState<number | null>(null);
 
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
@@ -247,26 +269,82 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [addAttemptOrder, getCalibratedNow, isConnected, userId]);
 
-  // const handleReady = useCallback(() => {
-  //   if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
-  //     return;
-  //   }
+  const handleSubmitAnswer = useCallback(() => {
+    if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
+      return;
+    }
 
-  //   const payload = {
-  //     event: GameEventId.PLAYER_READY,
-  //     ts: Math.round(getCalibratedNow()),
-  //     data: {
-  //       user_id: userId,
-  //       ready: !isReady,
-  //     },
-  //   };
+    // 收集选中的标签ID
+    const selectedTagIds = Object.values(selectedTagByGroup).filter(
+      (tagId): tagId is number => tagId !== null,
+    );
 
-  //   void wsRef.current.sendJson(payload);
-  // }, [isConnected, getCalibratedNow, userId, isReady]);
+    const payload = {
+      event: GameEventId.SUBMIT_ANSWER,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        user_id: userId,
+        tag_ids: selectedTagIds,
+        description: description,
+      },
+    };
+
+    void wsRef.current.sendJson(payload);
+    setIsAnswerModalOpen(false);
+    setIsAnswerModalMinimized(false);
+  }, [isConnected, getCalibratedNow, userId, selectedTagByGroup, description]);
+
+  const toggleAnswerModal = useCallback(() => {
+    setIsAnswerModalMinimized(!isAnswerModalMinimized);
+  }, [isAnswerModalMinimized]);
+
+  const handleReady = useCallback(() => {
+    if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.PLAYER_READY,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        user_id: userId,
+        ready: !isReady,
+      },
+    };
+
+    void wsRef.current.sendJson(payload);
+  }, [isConnected, getCalibratedNow, userId, isReady]);
+
+  const handleRemovePlayer = useCallback((playerId: number) => {
+    if (!isConnected || !wsRef.current?.isConnected() || !isOwner || playerId === userId) {
+      return;
+    }
+
+    setPlayerToRemove(playerId);
+    removePlayerDialogRef.current?.showModal();
+  }, [isConnected, isOwner, userId]);
+
+  const confirmRemovePlayer = useCallback(() => {
+    if (!isConnected || !wsRef.current?.isConnected() || !isOwner || playerToRemove === null) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.KICK_USER,
+      ts: Math.round(getCalibratedNow()),
+      data: {
+        user_id: playerToRemove,
+      },
+    };
+
+    void wsRef.current.sendJson(payload);
+    removePlayerDialogRef.current?.close();
+    setPlayerToRemove(null);
+  }, [isConnected, getCalibratedNow, isOwner, playerToRemove]);
 
   const handleGameStart = useCallback(() => {
     if (
-      !user?.isOwner ||
+      !isOwner ||
       !wsRef.current?.isConnected() ||
       roomState?.statusCode !== 0
     ) {
@@ -280,7 +358,7 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
-  }, [getCalibratedNow, roomState?.statusCode, user?.isOwner]);
+  }, [getCalibratedNow, roomState?.statusCode, isOwner]);
 
   // const handleLeaveRoom = useCallback(async () => {
   //   if (!roomId || userId === null) {
@@ -314,7 +392,7 @@ function RoomPage() {
   const sendPlaybackControl = useCallback(
     async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
       if (
-        !user?.isOwner ||
+        !isOwner ||
         !wsRef.current?.isConnected() ||
         !audioRef.current
       ) {
@@ -341,7 +419,7 @@ function RoomPage() {
 
       await wsRef.current.sendJson(payload);
     },
-    [getCalibratedNow, user?.isOwner, currentAudioUrl],
+    [getCalibratedNow, isOwner, currentAudioUrl],
   );
 
   const handleTogglePlayPause = useCallback(() => {
@@ -354,7 +432,7 @@ function RoomPage() {
   }, [audioState, isPlaybackStateMissing, sendPlaybackControl]);
 
   const handleJudgeSubmit = useCallback(() => {
-    if (!wsRef.current?.isConnected() || !user?.isOwner) {
+    if (!wsRef.current?.isConnected() || !isOwner) {
       return;
     }
 
@@ -380,10 +458,10 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
     judgingDialogRef.current?.close();
     confirmAnswerDialogRef.current?.close();
-  }, [selectedTags, selectedDescriptions, getCalibratedNow, user?.isOwner]);
+  }, [selectedTags, selectedDescriptions, getCalibratedNow, isOwner]);
 
   const handleSkipRound = useCallback(() => {
-    if (!wsRef.current?.isConnected() || !user?.isOwner) {
+    if (!wsRef.current?.isConnected() || !isOwner) {
       return;
     }
 
@@ -395,7 +473,7 @@ function RoomPage() {
 
     void wsRef.current.sendJson(payload);
     skipConfirmDialogRef.current?.close();
-  }, [getCalibratedNow, user?.isOwner]);
+  }, [getCalibratedNow, isOwner]);
 
   const handleSelectJudgingTag = (groupId: number, tagId: number) => {
     setSelectedTags((prev) => ({
@@ -623,6 +701,21 @@ function RoomPage() {
       },
     );
 
+    // 处理用户答题轮次事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.YOUR_TURN;
+      ts: number;
+      data: {
+        user_id: number;
+      };
+    }>(GameEventId.YOUR_TURN, (message) => {
+      const turnUserId = message?.data?.user_id;
+      if (typeof turnUserId === "number" && turnUserId === userId) {
+        setIsAnswerModalOpen(true);
+        setIsAnswerModalMinimized(false);
+      }
+    });
+
     wsRef.current.onJsonEvent<{
       event: typeof GameEventId.JUDGING;
       ts: number;
@@ -640,6 +733,13 @@ function RoomPage() {
           id: number;
           username: string;
           description: string;
+        }>;
+        player_answers?: Array<{
+          player_id: number;
+          username: string;
+          answers: Record<number, number>; // tagGroupId -> tagId
+          description: string;
+          order: number;
         }>;
       };
     }>(GameEventId.JUDGING, (message) => {
@@ -664,6 +764,27 @@ function RoomPage() {
 
       // 存储玩家精确描述
       setPlayerDescriptions(message.data?.player_descriptions || []);
+
+      // 存储玩家作答情况
+      if (message.data?.player_answers) {
+        setPlayerAnswers(message.data.player_answers.map(answer => ({
+          playerId: answer.player_id,
+          username: answer.username,
+          answers: answer.answers,
+          description: answer.description,
+          order: answer.order
+        })));
+      } else {
+        // 如果没有player_answers，尝试从player_descriptions构建
+        const playerAnswersFromDescriptions = message.data?.player_descriptions?.map((desc, index) => ({
+          playerId: desc.id,
+          username: desc.username,
+          answers: {},
+          description: desc.description,
+          order: index + 1
+        })) || [];
+        setPlayerAnswers(playerAnswersFromDescriptions);
+      }
 
       // 初始化选中的标签
       const initialSelectedTags: Record<number, number | null> = {};
@@ -813,9 +934,26 @@ function RoomPage() {
           statusCode: 1,
         });
       }
-      // setCountdown(null);
-      // setIsReady(false);
+      setCountdown(null);
+      setIsReady(false);
     });
+
+    // 处理玩家准备事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.PLAYER_READY;
+      ts: number;
+      data: {
+        user_id: number;
+        ready: boolean;
+      };
+    }>(GameEventId.PLAYER_READY, (message) => {
+      const { user_id, ready } = message.data;
+      if (user_id === userId) {
+        setIsReady(ready);
+      }
+    });
+
+
 
     // 处理回合开始事件
     wsRef.current.onJsonEvent<RoundStartMessage>(
@@ -848,7 +986,15 @@ function RoomPage() {
         // 3. 清除抢答队列状态
         setAnswerOrderByUserId({});
 
-        // 4. 隐藏判分界面和曲目信息
+        // 4. 清空玩家作答情况
+        setPlayerAnswers([]);
+
+        // 5. 重置答题弹窗状态
+        setIsAnswerModalOpen(false);
+        setIsAnswerModalMinimized(false);
+        setDescription("");
+
+        // 6. 隐藏判分界面和曲目信息
         setIsJudging(false);
         setCurrentSong(null);
 
@@ -957,7 +1103,7 @@ function RoomPage() {
       return;
     }
 
-    if (!user?.isOwner) {
+    if (!isOwner) {
       return;
     }
 
@@ -1031,7 +1177,7 @@ function RoomPage() {
       parent.removeEventListener("mouseup", onMouseUp);
       parent.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [sendPlaybackControl, user]);
+  }, [sendPlaybackControl, isOwner]);
 
   const setVolume = (value: number) => {
     const safeValue = Math.max(0, Math.min(200, value));
@@ -1171,7 +1317,7 @@ function RoomPage() {
           className="flex-1"
           showAlbum={true}
         />
-        {user?.isOwner ? (
+        {isOwner ? (
           <div className="card shadow-sm min-w-xs">
             <div className="card-body">
               <button
@@ -1258,10 +1404,13 @@ function RoomPage() {
             <div className="divider m-0"></div>
             <div>房主： {roomOwner}</div>
             <div className="text-sm ">房间ID： {roomId}</div>
-            {/* <div className="join w-full">
+            <div className="join w-full mt-4">
               <button
                 type="button"
-                className={`btn btn-soft btn-sm join-item flex-1 ${isReady ? "btn-success" : "btn-primary"}`}
+                className={clsx("btn btn-soft btn-sm join-item flex-1", {
+                  "btn-success": isReady,
+                  "btn-primary": !isReady
+                })}
                 onClick={handleReady}
                 disabled={!isConnected}
               >
@@ -1273,14 +1422,7 @@ function RoomPage() {
                   <div className="text-2xl font-bold">{countdown}</div>
                 </div>
               )}
-              <button
-                type="button"
-                className="btn btn-soft btn-sm btn-error join-item flex-1"
-                onClick={handleLeaveRoom}
-              >
-                退出
-              </button>
-            </div> */}
+            </div>
           </div>
         </div>
       </div>
@@ -1289,10 +1431,10 @@ function RoomPage() {
           <button
             type="button"
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
-              "btn-disabled": !isConnected || isCurrentPlayerInAnswerQueue,
+              "btn-disabled": !isConnected || isCurrentPlayerInAnswerQueue || !user,
               "btn-active": isBuzzHotkeyActive,
             })}
-            disabled={!isConnected || isCurrentPlayerInAnswerQueue}
+            disabled={!isConnected || isCurrentPlayerInAnswerQueue || !user}
             onClick={handleBuzz}
           >
             <h2 className="text-3xl">抢答！</h2>
@@ -1307,14 +1449,40 @@ function RoomPage() {
             </div>
           </button>
         </div>
-        <TagGroupSelector
-          tagGroups={tagGroups}
-          selectedTags={selectedTagByGroup}
-          onSelectTag={selectGroupTag}
-          showHeader={true}
-          headerText="选择 Tags"
-          className="flex-1 min-h-56"
-        />
+        <div className="card shadow-sm flex-1 min-h-56">
+          <div className="card-body overflow-auto p-0">
+            <table className="table table-pin-cols table-pin-rows">
+              <thead>
+                <tr>
+                  <th className="w-4 text-end">排名</th>
+                  <th className="">玩家</th>
+                  <td className="w-6 text-end">总分</td>
+                </tr>
+              </thead>
+              <tbody>
+                {scores.length > 0 ? (
+                  [...scores]
+                    .sort((a, b) => b.score - a.score)
+                    .map((player, index) => (
+                      <tr key={player.player_id} className={clsx({
+                        'bg-primary/10 font-bold': userId !== null && player.player_id === userId
+                      })}>
+                        <th className="text-end">{index + 1}</th>
+                        <th className="text-nowrap">{player.username}</th>
+                        <td className="text-end">{player.score}</td>
+                      </tr>
+                    ))
+                ) : (
+                  <tr>
+                    <td colSpan={3} className="text-center">
+                      暂无得分记录
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
         <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
           <div className="card-body p-2">
             <ul className="list gap-2">
@@ -1332,6 +1500,7 @@ function RoomPage() {
               {sortedOnlinePlayers.length > 0 ? (
                 sortedOnlinePlayers.map((player) => {
                   const order = answerOrderByUserId[player.id];
+                  const isCurrentUser = userId !== null && player.id === userId;
                   return (
                     <li
                       key={player.id}
@@ -1339,12 +1508,27 @@ function RoomPage() {
                         "buzz-ordered-item": typeof order === "number",
                       })}
                     >
-                      <UserBar
-                        username={player.username}
-                        order={order}
-                        activate={typeof order === "number"}
-                        isSelf={userId !== null && player.id === userId}
-                      />
+                      <div className="flex items-center justify-between">
+                        <UserBar
+                          username={player.username}
+                          order={order}
+                          activate={typeof order === "number"}
+                          isSelf={isCurrentUser}
+                        />
+                        {isOwner && !isCurrentUser && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-xs ml-2"
+                            onClick={() => handleRemovePlayer(player.id)}
+                          >
+                            <Icon
+                              icon="heroicons:trash-2"
+                              width={16}
+                              height={16}
+                            />
+                          </button>
+                        )}
+                      </div>
                     </li>
                   );
                 })
@@ -1358,36 +1542,68 @@ function RoomPage() {
         </div>
       </div>
 
-      <div className="card shadow-sm max-h-120">
-        <div className="card-body overflow-auto p-0">
-          <table className="table table-pin-cols table-pin-rows">
-            <thead>
-              <tr>
-                <th className="w-4 text-end">排名</th>
-                <th className="">玩家</th>
-                <td className="w-6 text-end">总分</td>
-              </tr>
-            </thead>
-            <tbody>
-              {scores.length > 0 ? (
-                [...scores]
-                  .sort((a, b) => b.score - a.score)
-                  .map((player, index) => (
-                    <tr key={player.player_id} className="">
-                      <th className="text-end">{index + 1}</th>
-                      <th className="text-nowrap">{player.username}</th>
-                      <td className="text-end">{player.score}</td>
-                    </tr>
-                  ))
-              ) : (
+
+
+      {/* 玩家作答情况展示表格 */}
+      <div className="card shadow-sm">
+        <div className="card-body p-0">
+          <h3 className="font-semibold text-lg p-4 border-b">
+            <Icon
+              icon="heroicons:clipboard-list"
+              width={20}
+              height={20}
+              className="inline mr-2"
+            />
+            玩家作答情况
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="table table-pin-cols table-pin-rows">
+              <thead>
                 <tr>
-                  <td colSpan={3} className="text-center">
-                    暂无得分记录
-                  </td>
+                  <th className="w-4 text-end">顺序</th>
+                  <th className="">玩家</th>
+                  {tagGroups.map((group) => (
+                    <th key={group.id} className="text-center min-w-20">
+                      {group.name}
+                    </th>
+                  ))}
+                  <th className="min-w-40">精确描述</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {playerAnswers.length > 0 ? (
+                  playerAnswers
+                    .sort((a, b) => a.order - b.order)
+                    .map((answer) => (
+                      <tr key={answer.playerId} className={clsx({
+                        'bg-primary/10 font-bold': userId !== null && answer.playerId === userId
+                      })}>
+                        <th className="text-end">{answer.order}</th>
+                        <th className="text-nowrap">{answer.username}</th>
+                        {tagGroups.map((group) => {
+                          const selectedTagId = answer.answers[group.id];
+                          const selectedTag = group.tags.find(tag => tag.id === selectedTagId);
+                          return (
+                            <td key={group.id} className="text-center">
+                              {selectedTag ? selectedTag.name : '-'}
+                            </td>
+                          );
+                        })}
+                        <td className="max-w-40 truncate">
+                          {answer.description || '-'}
+                        </td>
+                      </tr>
+                    ))
+                ) : (
+                  <tr>
+                    <td colSpan={tagGroups.length + 3} className="text-center">
+                      暂无作答记录
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -1618,6 +1834,97 @@ function RoomPage() {
           <button>关闭</button>
         </form>
       </dialog>
+
+      {/* 移除玩家确认弹窗 */}
+      <dialog ref={removePlayerDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认移除玩家</h3>
+          <p className="py-4">确定要将该玩家移出房间吗？</p>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => removePlayerDialogRef.current?.close()}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-warning"
+              onClick={confirmRemovePlayer}
+            >
+              确认移除
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button>关闭</button>
+        </form>
+      </dialog>
+
+      {/* 答题弹窗 */}
+      <dialog ref={answerModalRef} className="modal" open={isAnswerModalOpen && !isAnswerModalMinimized}>
+        <div className="modal-box w-11/12 max-w-4xl">
+          <h2 className="font-bold text-2xl">答题</h2>
+          <div className="divider mt-0.5 mb-4"></div>
+          
+          <TagGroupSelector
+            tagGroups={tagGroups}
+            selectedTags={selectedTagByGroup}
+            onSelectTag={selectGroupTag}
+            showHeader={true}
+            headerText="选择 Tags"
+            className="mb-6"
+          />
+
+          {/* 精确描述输入框 */}
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-2">精确描述</h3>
+            <textarea
+              className="textarea textarea-bordered w-full"
+              placeholder="请输入精确描述..."
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            ></textarea>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={toggleAnswerModal}
+            >
+              暂时隐藏
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleSubmitAnswer}
+            >
+              提交答案
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button>关闭</button>
+        </form>
+      </dialog>
+
+      {/* 悬浮按钮（当弹窗被最小化时显示） */}
+      {isAnswerModalOpen && isAnswerModalMinimized && (
+        <button
+          type="button"
+          className="fixed bottom-6 right-6 btn btn-primary btn-circle h-16 w-16 shadow-lg"
+          onClick={toggleAnswerModal}
+        >
+          <Icon
+            icon="heroicons:clipboard-question-mark"
+            width={24}
+            height={24}
+          />
+        </button>
+      )}
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
 import usePersistStore from "../stores/persistStore";
 
-type HomeTab = "create" | "join";
+type HomeTab = "create" | "join" | "watch";
 
 function HomePage() {
   const navigate = useNavigate();
@@ -13,6 +13,7 @@ function HomePage() {
   const [titleInput, setTitleInput] = useState("");
   const [roomIdInput, setRoomIdInput] = useState("");
   const [joinNameInput, setJoinNameInput] = useState("");
+  const [watchRoomIdInput, setWatchRoomIdInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -149,6 +150,17 @@ function HomePage() {
             >
               加入房间
             </button>
+            <button
+              role="tab"
+              className={`tab ${activeTab === "watch" ? "tab-active" : ""}`}
+              type="button"
+              onClick={() => {
+                setActiveTab("watch");
+                setError(null);
+              }}
+            >
+              观战
+            </button>
           </div>
 
           {activeTab === "create" ? (
@@ -181,7 +193,7 @@ function HomePage() {
                 {creating ? "创建中..." : "创建房间"}
               </button>
             </form>
-          ) : (
+          ) : activeTab === "join" ? (
             <form className="flex flex-col gap-3" onSubmit={handleJoinRoom}>
               <label className="floating-label">
                 <input
@@ -209,6 +221,33 @@ function HomePage() {
                 disabled={joining}
               >
                 {joining ? "加入中..." : "加入房间"}
+              </button>
+            </form>
+          ) : (
+            <form className="flex flex-col gap-3" onSubmit={(ev) => {
+              ev.preventDefault();
+              const roomId = watchRoomIdInput.trim();
+              if (!roomId) {
+                setError("请输入房间号");
+                return;
+              }
+              navigate(`/room/${roomId}/watch`);
+            }}>
+              <label className="floating-label">
+                <input
+                  className="input input-bordered w-full"
+                  value={watchRoomIdInput}
+                  onChange={(e) => setWatchRoomIdInput(e.target.value)}
+                  placeholder="房间号（例如: ABC123）"
+                />
+                <span>房间号</span>
+              </label>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+              >
+                进入观战
               </button>
             </form>
           )}
