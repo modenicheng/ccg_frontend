@@ -36,9 +36,24 @@ const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 40;
 const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
 const CANVAS_INIT_DELAY_MS = 0;
+const PRELOAD_DEDUP_WINDOW_MS = 3000;
+const VOLUME_HOTKEY_STEP = 5;
+const VOLUME_TOAST_HIDE_DELAY_MS = 3000;
+const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
 
 let domProgressPercent = 0;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
+
+const logAudioTrigger = (
+  source: "PRELOAD" | "ROOM_STATE" | "ROUND_START",
+  url: string,
+) => {
+  if (!development) {
+    return;
+  }
+  const ts = Date.now();
+  console.debug(`[AUDIO_TRIGGER] source=${source} url=${url} ts=${ts}`);
+};
 
 const buildWsUrl = (roomId: string, token: string | null) => {
   const encodedRoomId = encodeURIComponent(roomId);
@@ -67,6 +82,13 @@ const readCookie = (name: string): string | null => {
   } catch {
     return matched[1];
   }
+};
+
+const parseErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) {
+    return `${fallback}：${error.message}`;
+  }
+  return fallback;
 };
 
 function RoomPage() {
@@ -176,8 +198,16 @@ function RoomPage() {
   const navigate = useNavigate();
 
   const audioRef = useRef<audioPlayer | null>(null);
+  const isOwnerRef = useRef<boolean>(false);
+  const userIdRef = useRef<number | null>(userId);
+  const switchingAudioUrlRef = useRef<string | null>(null);
+  const recentPreloadByUrlRef = useRef<Record<string, number>>({});
+  const sendPlaybackControlRef = useRef<
+    (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => Promise<void>
+  >(async () => {});
   const [audioState, setAudioState] = useState<string>("suspended");
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -194,7 +224,33 @@ function RoomPage() {
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
+  const [audioLoadError, setAudioLoadError] = useState<string | null>(null);
+  const [isVolumeToastVisible, setIsVolumeToastVisible] =
+    useState<boolean>(false);
+  const [isVolumeToastClosing, setIsVolumeToastClosing] =
+    useState<boolean>(false);
+  const volumeToastHideTimerRef = useRef<number | null>(null);
+  const volumeToastExitTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
+  const isWsDisconnected = !isConnected;
+
+  const notifyAudioLoadError = useCallback((message: string) => {
+    setAudioLoadError(message);
+  }, []);
+
+  useEffect(() => {
+    if (!audioLoadError) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setAudioLoadError(null);
+    }, 10000);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [audioLoadError]);
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -535,9 +591,61 @@ function RoomPage() {
   );
 
   useEffect(() => {
+    currentAudioUrlRef.current = currentAudioUrl;
+  }, [currentAudioUrl]);
+
+  useEffect(() => {
+    userIdRef.current = userId;
+  }, [userId]);
+
+  const switchAudioSourceIfNeeded = useCallback(
+    async (nextAudioUrl: string) => {
+      const player = audioRef.current;
+      if (!player) {
+        return;
+      }
+
+      if (nextAudioUrl === currentAudioUrlRef.current) {
+        return;
+      }
+
+      if (switchingAudioUrlRef.current === nextAudioUrl) {
+        return;
+      }
+
+      const previousAudioUrl = currentAudioUrlRef.current;
+      switchingAudioUrlRef.current = nextAudioUrl;
+      currentAudioUrlRef.current = nextAudioUrl;
+
+      try {
+        await player.playUrlAsStream(nextAudioUrl, false);
+        setCurrentAudioUrl(nextAudioUrl);
+      } catch (error) {
+        currentAudioUrlRef.current = previousAudioUrl;
+        throw error;
+      } finally {
+        if (switchingAudioUrlRef.current === nextAudioUrl) {
+          switchingAudioUrlRef.current = null;
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    isOwnerRef.current = isOwner;
+  }, [isOwner]);
+
+  useEffect(() => {
+    sendPlaybackControlRef.current = sendPlaybackControl;
+  }, [sendPlaybackControl]);
+
+  useEffect(() => {
     if (!roomId) {
       return;
     }
+
+    let isDisposed = false;
 
     const token = sessionStorage.getItem(`ccg-room-token:${roomId}`);
     const wsUrl = buildWsUrl(roomId, token);
@@ -549,6 +657,9 @@ function RoomPage() {
     wsRef.current.onJsonEvent<RoomStateMessage>(
       GameEventId.ROOM_STATE,
       async (message) => {
+        if (isDisposed) {
+          return;
+        }
         const payload = message.data;
 
         // 从玩家列表中获取房主
@@ -605,11 +716,10 @@ function RoomPage() {
           try {
             // 检查是否需要切换音频URL
             const newAudioUrl = playbackStatus.audio_url;
-            if (newAudioUrl && newAudioUrl !== currentAudioUrl) {
+            if (newAudioUrl && newAudioUrl !== currentAudioUrlRef.current) {
+              logAudioTrigger("ROOM_STATE", newAudioUrl);
               // 切换音频源
-              await audioPlayer.preload(newAudioUrl);
-              await audioPlayer.playUrlAsStream(newAudioUrl, false);
-              setCurrentAudioUrl(newAudioUrl);
+              await switchAudioSourceIfNeeded(newAudioUrl);
             }
 
             // 创建伪PlayControlMessage用于applyRemoteProgress
@@ -634,6 +744,9 @@ function RoomPage() {
             }
           } catch (error) {
             console.error("Failed to sync audio playback:", error);
+            notifyAudioLoadError(
+              parseErrorMessage(error, "音频加载失败，请稍后重试"),
+            );
             // 音频同步失败，但继续其他初始化
           }
         }
@@ -718,7 +831,7 @@ function RoomPage() {
       };
     }>(GameEventId.YOUR_TURN, (message) => {
       const turnUserId = message?.data?.user_id;
-      if (typeof turnUserId === "number" && turnUserId === userId) {
+      if (typeof turnUserId === "number" && turnUserId === userIdRef.current) {
         setIsAnswerModalOpen(true);
         setIsAnswerModalMinimized(false);
       }
@@ -956,7 +1069,7 @@ function RoomPage() {
       };
     }>(GameEventId.PLAYER_READY, (message) => {
       const { user_id, ready } = message.data;
-      if (user_id === userId) {
+      if (user_id === userIdRef.current) {
         setIsReady(ready);
       }
     });
@@ -967,16 +1080,21 @@ function RoomPage() {
     wsRef.current.onJsonEvent<RoundStartMessage>(
       GameEventId.ROUND_START,
       async (message) => {
+        if (isDisposed) {
+          return;
+        }
         const roundData = message.data;
 
         // 1. 切换到新音频URL（如果提供）
-        if (roundData.audio_url && roundData.audio_url !== currentAudioUrl) {
+        if (roundData.audio_url && roundData.audio_url !== currentAudioUrlRef.current) {
           try {
-            await audioRef.current?.preload(roundData.audio_url);
-            await audioRef.current?.playUrlAsStream(roundData.audio_url, false);
-            setCurrentAudioUrl(roundData.audio_url);
+            logAudioTrigger("ROUND_START", roundData.audio_url);
+            await switchAudioSourceIfNeeded(roundData.audio_url);
           } catch (error) {
             console.error("Failed to load audio for round start:", error);
+            notifyAudioLoadError(
+              parseErrorMessage(error, "回合音频加载失败，请稍后重试"),
+            );
           }
         }
 
@@ -991,18 +1109,27 @@ function RoomPage() {
           audioRef.current.progressMs = 0;
         }
 
-        // 3. 清除抢答队列状态
+        // 3. 回合开始后自动恢复播放
+        if (audioRef.current) {
+          try {
+            await audioRef.current.resume();
+          } catch (error) {
+            console.error("Failed to auto resume audio on round start:", error);
+          }
+        }
+
+        // 4. 清除抢答队列状态
         setAnswerOrderByUserId({});
 
-        // 4. 清空玩家作答情况
+        // 5. 清空玩家作答情况
         setPlayerAnswers([]);
 
-        // 5. 重置答题弹窗状态
+        // 6. 重置答题弹窗状态
         setIsAnswerModalOpen(false);
         setIsAnswerModalMinimized(false);
         setDescription("");
 
-        // 6. 隐藏判分界面和曲目信息
+        // 7. 隐藏判分界面和曲目信息
         setIsJudging(false);
         setCurrentSong(null);
 
@@ -1018,13 +1145,13 @@ function RoomPage() {
       event: typeof GameEventId.ROUND_STATE_UPDATE;
       ts: number;
       data: {
-        round_state: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
-        round_state_code: 0 | 1 | 2 | 3 | 4;
+        round_state: 0 | 1 | 2 | 3 | 4;
+        round_state_name: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
       };
     }>(GameEventId.ROUND_STATE_UPDATE, (message) => {
-      const { round_state, round_state_code } = message.data;
-      gameStore.getState().setRoundState(round_state, round_state_code);
-      console.log(`Round state updated: ${round_state} (code: ${round_state_code})`);
+      const { round_state, round_state_name } = message.data;
+      gameStore.getState().setRoundState(round_state_name, round_state);
+      console.log(`Round state updated: ${round_state_name} (code: ${round_state})`);
     });
 
     // 处理起始位置更新事件
@@ -1078,13 +1205,35 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PreloadAudioMessage>(
       GameEventId.PRELOAD_AUDIO,
       async (message) => {
+        if (isDisposed) {
+          return;
+        }
         const { audio_url } = message.data;
-        if (audio_url && audioRef.current) {
+        if (!audio_url) {
+          return;
+        }
+
+        const now = Date.now();
+        const lastPreloadTs = recentPreloadByUrlRef.current[audio_url] ?? 0;
+        if (now - lastPreloadTs < PRELOAD_DEDUP_WINDOW_MS) {
+          return;
+        }
+
+        if (
+          audioRef.current &&
+          audio_url !== currentAudioUrlRef.current &&
+          audio_url !== switchingAudioUrlRef.current
+        ) {
           try {
+            logAudioTrigger("PRELOAD", audio_url);
+            recentPreloadByUrlRef.current[audio_url] = now;
             await audioRef.current.preload(audio_url);
             console.log(`Audio preloaded: ${audio_url}`);
           } catch (error) {
             console.error("Failed to preload audio:", error);
+            notifyAudioLoadError(
+              parseErrorMessage(error, "音频预加载失败，请稍后重试"),
+            );
           }
         }
       }
@@ -1098,6 +1247,7 @@ function RoomPage() {
     const stopHeartbeat = startHeartbeat(wsRef.current, 1000, 1000);
 
     return () => {
+      isDisposed = true;
       stopHeartbeat();
       wsRef.current?.close();
       wsRef.current = undefined;
@@ -1107,13 +1257,13 @@ function RoomPage() {
   }, [
     addAttemptOrder,
     applyRemoteProgress,
-    currentAudioUrl,
     roomId,
     setConnected,
     setRoomId,
     setUrl,
     setWsClient,
-    userId,
+    switchAudioSourceIfNeeded,
+    notifyAudioLoadError,
   ]);
 
   useEffect(() => {
@@ -1123,6 +1273,12 @@ function RoomPage() {
       setAudioState(nextState);
     };
     setAudioState(audioRef.current.state);
+    audioRef.current.onEnded = () => {
+      if (!isOwnerRef.current || !wsRef.current?.isConnected()) {
+        return;
+      }
+      void sendPlaybackControlRef.current(GameEventId.PAUSE);
+    };
     audioRef.current.onTimeUpdate = (ev) => {
       if (progressBarRef.current && !isProgressDraggingRef.current) {
         const audioElement = ev.target as HTMLAudioElement;
@@ -1264,7 +1420,30 @@ function RoomPage() {
     };
   }, [sendPlaybackControl, isOwner]);
 
-  const setVolume = (value: number) => {
+  const showVolumeToast = useCallback(() => {
+    setIsVolumeToastClosing(false);
+    setIsVolumeToastVisible(true);
+    if (volumeToastHideTimerRef.current !== null) {
+      window.clearTimeout(volumeToastHideTimerRef.current);
+    }
+    if (volumeToastExitTimerRef.current !== null) {
+      window.clearTimeout(volumeToastExitTimerRef.current);
+      volumeToastExitTimerRef.current = null;
+    }
+
+    volumeToastHideTimerRef.current = window.setTimeout(() => {
+      setIsVolumeToastClosing(true);
+      volumeToastHideTimerRef.current = null;
+
+      volumeToastExitTimerRef.current = window.setTimeout(() => {
+        setIsVolumeToastVisible(false);
+        setIsVolumeToastClosing(false);
+        volumeToastExitTimerRef.current = null;
+      }, VOLUME_TOAST_EXIT_ANIMATION_MS);
+    }, VOLUME_TOAST_HIDE_DELAY_MS);
+  }, []);
+
+  const setVolume = useCallback((value: number) => {
     const safeValue = Math.max(0, Math.min(200, value));
     setLocalVolume(safeValue);
     setPersistVolume(safeValue);
@@ -1272,7 +1451,36 @@ function RoomPage() {
     if (audioRef.current) {
       audioRef.current.volume = safeValue;
     }
-  };
+  }, [setPersistVolume]);
+
+  const adjustVolume = useCallback(
+    (delta: number) => {
+      setLocalVolume((previousVolume) => {
+        const nextVolume = Math.max(0, Math.min(200, previousVolume + delta));
+        setPersistVolume(nextVolume);
+
+        if (audioRef.current) {
+          audioRef.current.volume = nextVolume;
+        }
+
+        return nextVolume;
+      });
+    },
+    [setPersistVolume],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (volumeToastHideTimerRef.current !== null) {
+        window.clearTimeout(volumeToastHideTimerRef.current);
+        volumeToastHideTimerRef.current = null;
+      }
+      if (volumeToastExitTimerRef.current !== null) {
+        window.clearTimeout(volumeToastExitTimerRef.current);
+        volumeToastExitTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -1340,6 +1548,51 @@ function RoomPage() {
       window.removeEventListener("blur", onWindowBlur);
     };
   }, [handleBuzz, isConnected]);
+
+  useEffect(() => {
+    const isVolumeDownHotkey = (ev: KeyboardEvent) => {
+      return (
+        ev.key === "-" ||
+        ev.key === "_" ||
+        ev.code === "Minus" ||
+        ev.code === "NumpadSubtract"
+      );
+    };
+
+    const isVolumeUpHotkey = (ev: KeyboardEvent) => {
+      return (
+        ev.key === "=" ||
+        ev.key === "+" ||
+        ev.code === "Equal" ||
+        ev.code === "NumpadAdd"
+      );
+    };
+
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.ctrlKey || ev.metaKey || ev.altKey) {
+        return;
+      }
+
+      if (isVolumeDownHotkey(ev)) {
+        ev.preventDefault();
+        adjustVolume(-VOLUME_HOTKEY_STEP);
+        showVolumeToast();
+        return;
+      }
+
+      if (isVolumeUpHotkey(ev)) {
+        ev.preventDefault();
+        adjustVolume(VOLUME_HOTKEY_STEP);
+        showVolumeToast();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [adjustVolume, showVolumeToast]);
 
   if (!roomId) {
     return <Navigate to="/" replace />;
@@ -1411,7 +1664,7 @@ function RoomPage() {
                   "btn-success": audioState !== "running",
                   "btn-warning": audioState === "running",
                 })}
-                disabled={isPlaybackStateMissing}
+                disabled={isPlaybackStateMissing || isWsDisconnected}
                 onClick={handleTogglePlayPause}
               >
                 {isPlaybackStateMissing ? (
@@ -1432,11 +1685,13 @@ function RoomPage() {
                 )}
               </button>
               <div className="join w-full">
-                <div
+                <button
+                  type="button"
                   className={clsx("btn btn-sm btn-soft join-item flex-1", {
                     "btn-primary": roomState?.statusCode === 0,
                     "btn-warning": roomState?.statusCode !== 0,
                   })}
+                  disabled={isWsDisconnected}
                   onClick={() => {
                     if (roomState?.statusCode === 0) {
                       handleGameStart();
@@ -1457,14 +1712,16 @@ function RoomPage() {
                       下一轮
                     </>
                   )}
-                </div>
-                <div
+                </button>
+                <button
+                  type="button"
                   className="btn btn-info btn-sm btn-soft join-item flex-1"
+                  disabled={isWsDisconnected}
                   onClick={() => judgingDialogRef.current?.showModal()}
                 >
                   <Icon icon="heroicons:scale" width={16} height={16} />
                   判分
-                </div>
+                </button>
               </div>
               <div
                 className="btn btn-sm  btn-soft"
@@ -1616,6 +1873,7 @@ function RoomPage() {
                           <button
                             type="button"
                             className="btn btn-ghost btn-xs ml-2"
+                            disabled={isWsDisconnected}
                             onClick={() => handleRemovePlayer(player.id)}
                           >
                             <Icon
@@ -1704,6 +1962,45 @@ function RoomPage() {
         </div>
       </div>
 
+      {audioLoadError ? (
+        <div className="toast toast-top toast-center z-50">
+          <div role="alert" className="alert alert-soft alert-error">
+            <span>{audioLoadError}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {isVolumeToastVisible ? (
+        <div className="toast toast-top toast-start z-50">
+          <div
+            className={clsx(
+              "card bg-base-100 shadow-lg w-64 transition-all duration-200 ease-out",
+              {
+                "opacity-100 translate-y-0 scale-100": !isVolumeToastClosing,
+                "opacity-0 -translate-y-1 scale-95": isVolumeToastClosing,
+              },
+            )}
+          >
+            <div className="card-body gap-2 p-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-semibold">音量</span>
+                <span className="font-mono">{localVolume}%</span>
+              </div>
+              <progress
+                className={clsx("progress w-full volume-progress-eased", {
+                  "progress-primary": localVolume <= 100,
+                  "progress-warning":
+                    localVolume > 100 && localVolume <= 150,
+                  "progress-error": localVolume > 150,
+                })}
+                value={localVolume}
+                max="200"
+              ></progress>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <dialog ref={settingDialogRef} className="modal">
         <div className="modal-box w-full max-w-200">
           <h2 className="font-bold text-2xl">设置</h2>
@@ -1732,6 +2029,15 @@ function RoomPage() {
           </div>
           <div className="flex flex-col gap-1.5 mt-4">
             <h3 className="font-semibold text-xl">音量</h3>
+            <div className="text-xs opacity-70 flex items-center gap-1">
+              快捷键：
+              <kbd className="kbd kbd-xs">-</kbd>
+              <span>/</span>
+              <kbd className="kbd kbd-xs">=</kbd>
+              <span>（</span>
+              <kbd className="kbd kbd-xs">+</kbd>
+              <span>）</span>
+            </div>
             <div className="flex">
               <input
                 type="range"
@@ -1894,6 +2200,7 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-warning"
+              disabled={isWsDisconnected}
               onClick={handleSkipRound}
             >
               确认下一轮
@@ -1921,6 +2228,7 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-primary"
+              disabled={isWsDisconnected}
               onClick={handleJudgeSubmit}
             >
               确认提交
@@ -1948,6 +2256,7 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-warning"
+              disabled={isWsDisconnected}
               onClick={confirmRemovePlayer}
             >
               确认移除
@@ -1997,6 +2306,7 @@ function RoomPage() {
             <button
               type="button"
               className="btn btn-primary"
+              disabled={isWsDisconnected}
               onClick={handleSubmitAnswer}
             >
               提交答案

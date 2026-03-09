@@ -15,6 +15,7 @@ class audioPlayer {
   private preloadTable: Record<string, HTMLAudioElement> = {}; // URL -> HTMLAudioElement
 
   private stateChangeCallback?: (state: string) => void;
+  private endedCallback?: () => void;
   private timeUpdateCallback = (ev: Event) => {
     const audio = ev.target as HTMLAudioElement;
     console.log(
@@ -202,7 +203,6 @@ class audioPlayer {
     audio.preload = "auto";
     audio.src = url;
     audio.loop = false;
-    audio.load();
     this.preloadTable[url] = audio;
     // 只要开始预加载就直接用这个开始加载的，无论是不是可以用
     // 避免重复创建元素和请求
@@ -231,10 +231,6 @@ class audioPlayer {
       audio.preload = "auto";
       audio.loop = false;
       audio.currentTime = 0;
-      // 如果音频元素尚未加载，重新加载
-      if (audio.readyState < 2) { // HAVE_FETCHED or higher
-        audio.load();
-      }
     } else {
       console.log(
         `No preloaded audio found for URL: ${url}, creating new audio element.`,
@@ -246,7 +242,6 @@ class audioPlayer {
       audio.preload = "auto";
       audio.src = url;
       audio.loop = false;
-      audio.load(); // 可选，设置 src 后自动开始加载
       // 存储预加载引用供下次使用
       this.preloadTable[url] = audio;
     }
@@ -290,6 +285,7 @@ class audioPlayer {
     audio.onended = () => {
       this.audioState = "closed";
       this.stateChangeCallback?.(this.audioState);
+      this.endedCallback?.();
     };
   }
 
@@ -427,6 +423,10 @@ class audioPlayer {
 
   set onTimeUpdate(callback: (ev: Event) => void) {
     this.timeUpdateCallback = callback;
+  }
+
+  set onEnded(callback: () => void) {
+    this.endedCallback = callback;
   }
 
   /**

@@ -52,6 +52,8 @@ function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
     title: data.title ?? null,
     status: data.status,
     statusCode,
+    roundState: data.roundState ?? "PENDING",
+    roundStateCode: data.roundStateCode ?? 0,
     song_start_range_percent: null,
     players: [], // full player objects not available
     answer_queue: [],

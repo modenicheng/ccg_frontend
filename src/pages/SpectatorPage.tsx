@@ -18,6 +18,7 @@ import type {
   PlayControlMessage,
   AttemptAnswerMessage,
   RoundStartMessage,
+  PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -93,6 +94,7 @@ function SpectatorPage() {
 
   const audioRef = useRef<audioPlayer | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -161,6 +163,10 @@ function SpectatorPage() {
   );
 
   useEffect(() => {
+    currentAudioUrlRef.current = currentAudioUrl;
+  }, [currentAudioUrl]);
+
+  useEffect(() => {
     if (!roomId) {
       return;
     }
@@ -192,6 +198,10 @@ function SpectatorPage() {
           title: payload.title,
           status: mapStatusCodeToStatus(payload.status),
           statusCode: payload.status,
+
+          // 回合状态
+          roundState: typeof payload.round_state === "string" ? payload.round_state : "PENDING",
+          roundStateCode: typeof payload.round_state === "number" ? payload.round_state : 0,
 
           // 播放相关
           song_start_range_percent: payload.song_start_range_percent,
@@ -226,7 +236,7 @@ function SpectatorPage() {
           try {
             // 检查是否需要切换音频URL
             const newAudioUrl = playbackStatus.audio_url;
-            if (newAudioUrl && newAudioUrl !== currentAudioUrl) {
+            if (newAudioUrl && newAudioUrl !== currentAudioUrlRef.current) {
               // 切换音频源
               await audioPlayer.preload(newAudioUrl);
               await audioPlayer.playUrlAsStream(newAudioUrl, false);
@@ -499,7 +509,7 @@ function SpectatorPage() {
         const roundData = message.data;
 
         // 1. 切换到新音频URL（如果提供）
-        if (roundData.audio_url && roundData.audio_url !== currentAudioUrl) {
+        if (roundData.audio_url && roundData.audio_url !== currentAudioUrlRef.current) {
           try {
             await audioRef.current?.preload(roundData.audio_url);
             await audioRef.current?.playUrlAsStream(roundData.audio_url, false);
@@ -534,6 +544,22 @@ function SpectatorPage() {
       },
     );
 
+    // 处理音频预加载事件
+    wsRef.current.onJsonEvent<PreloadAudioMessage>(
+      GameEventId.PRELOAD_AUDIO,
+      async (message) => {
+        const { audio_url } = message.data;
+        if (audio_url && audioRef.current) {
+          try {
+            await audioRef.current.preload(audio_url);
+            console.log(`Audio preloaded: ${audio_url}`);
+          } catch (error) {
+            console.error("Failed to preload audio:", error);
+          }
+        }
+      },
+    );
+
     wsRef.current.onConnectionStateChange(setConnected);
 
     setUrl(wsUrl);
@@ -550,7 +576,6 @@ function SpectatorPage() {
     };
   }, [
     applyRemoteProgress,
-    currentAudioUrl,
     roomId,
     setConnected,
     setRoomId,

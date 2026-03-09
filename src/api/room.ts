@@ -51,6 +51,8 @@ export interface RoomInfoResponse {
   roomId: string;
   hostPlayerId: string;
   status: "waiting" | "playing" | "ended";
+  roundState?: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+  roundStateCode?: 0 | 1 | 2 | 3 | 4;
   title?: string | null;
   description?: string | null;
   players: string[];
@@ -84,6 +86,7 @@ interface BackendRoomInfoResponse {
   room_id: string;
   host_player_id: string;
   status: number;
+  round_state?: number;
   title?: string | null;
   players: Array<{ id: number; username: string; is_owner: boolean }>;
   tag_groups: BackendTagGroupResponse[];
@@ -121,6 +124,26 @@ const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse & { player
     roomId: data.room_id,
     hostPlayerId: data.host_player_id,
     status: mapRoomStatus(data.status),
+    roundState:
+      data.round_state === 1
+        ? "PLAYING_AUDIO"
+        : data.round_state === 2
+          ? "ANSWERING"
+          : data.round_state === 3
+            ? "JUDGING"
+            : data.round_state === 4
+              ? "COMPLETED"
+              : "PENDING",
+    roundStateCode:
+      data.round_state === 1
+        ? 1
+        : data.round_state === 2
+          ? 2
+          : data.round_state === 3
+            ? 3
+            : data.round_state === 4
+              ? 4
+              : 0,
     title: data.title ?? null,
     description: null,
     players: data.players.map((player) => player.username),

@@ -20,6 +20,18 @@
   opacity: 0.8;
 }
 
+.volume-progress-eased {
+  overflow: hidden;
+}
+
+.volume-progress-eased::-webkit-progress-value {
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.volume-progress-eased::-moz-progress-bar {
+  transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .no-transition {
   transition: none !important;
 }

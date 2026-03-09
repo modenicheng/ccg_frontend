@@ -22,6 +22,7 @@ export const GameEventId = {
   PLAY: 20,
   PAUSE: 21,
   SEEK: 22,
+  PRELOAD_AUDIO: 23,
 
   PLAYER_READY: 30,
   GAME_START: 31,
@@ -39,7 +40,8 @@ export const GameEventId = {
   JUDGE_SUBMIT: 41,
   SCORE_UPDATE: 42,
   SKIP_ROUND: 43,
-  ROUND_STATE_UPDATE: 44,
+  SHOW_ANSWER: 44,
+  ROUND_STATE_UPDATE: 45,
 } as const;
 
 export type GameEventId = typeof GameEventId[keyof typeof GameEventId];
