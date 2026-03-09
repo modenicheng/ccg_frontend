@@ -199,3 +199,73 @@ export function getHostPlayerId(players: WsPlayer[]): string {
   const owner = players.find(p => p.is_owner);
   return owner ? owner.id.toString() : "";
 }
+
+// 起始位置更新数据
+export interface StartPosUpdateData {
+  start_position_percent: number;
+}
+
+// 起始位置更新消息
+export interface StartPosUpdateMessage {
+  event: typeof GameEventId.START_POS_UPDATE;
+  ts: number;
+  data: StartPosUpdateData;
+}
+
+// 游戏结束得分项
+export interface GameOverScore {
+  player_id: number;
+  username: string;
+  score: number;
+}
+
+// 游戏结束数据
+export interface GameOverData {
+  manual: boolean;
+  final_scores: GameOverScore[];
+}
+
+// 游戏结束消息
+export interface GameOverMessage {
+  event: typeof GameEventId.GAME_OVER;
+  ts: number;
+  data: GameOverData;
+}
+
+// 清空抢答队列数据
+export interface ClearAnswerQueueData {
+  [key: string]: never;
+}
+
+// 清空抢答队列消息
+export interface ClearAnswerQueueMessage {
+  event: typeof GameEventId.CLEAR_ANSWER_QUEUE;
+  ts: number;
+  data: ClearAnswerQueueData;
+}
+
+// 预加载音频数据
+export interface PreloadAudioData {
+  audio_url: string;
+}
+
+// 预加载音频消息
+export interface PreloadAudioMessage {
+  event: typeof GameEventId.PRELOAD_AUDIO;
+  ts: number;
+  data: PreloadAudioData;
+}
+
+// 所有消息类型的联合类型
+export type WsMessage =
+  | RoomStateMessage
+  | PlayControlMessage
+  | RoundStartMessage
+  | AttemptAnswerMessage
+  | JudgingMessage
+  | ScoreUpdateMessage
+  | RoundStateUpdateMessage
+  | StartPosUpdateMessage
+  | GameOverMessage
+  | ClearAnswerQueueMessage
+  | PreloadAudioMessage;

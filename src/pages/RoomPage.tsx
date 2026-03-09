@@ -19,6 +19,10 @@ import type {
   PlayControlMessage,
   AttemptAnswerMessage,
   RoundStartMessage,
+  StartPosUpdateMessage,
+  GameOverMessage,
+  ClearAnswerQueueMessage,
+  PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -1022,6 +1026,69 @@ function RoomPage() {
       gameStore.getState().setRoundState(round_state, round_state_code);
       console.log(`Round state updated: ${round_state} (code: ${round_state_code})`);
     });
+
+    // 处理起始位置更新事件
+    wsRef.current.onJsonEvent<StartPosUpdateMessage>(
+      GameEventId.START_POS_UPDATE,
+      (message) => {
+        const { start_position_percent } = message.data;
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            song_start_range_percent: start_position_percent,
+            startPositionPercent: start_position_percent,
+          });
+        }
+        console.log(`Start position updated: ${start_position_percent}%`);
+      }
+    );
+
+    // 处理游戏结束事件
+    wsRef.current.onJsonEvent<GameOverMessage>(
+      GameEventId.GAME_OVER,
+      (message) => {
+        const { final_scores } = message.data;
+        // 更新游戏状态为结束
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            status: "ended",
+            statusCode: 2,
+          });
+        }
+        // 更新分数
+        gameStore.getState().setScores(final_scores);
+        console.log(`Game over with final scores:`, final_scores);
+        // 这里可以添加游戏结束的UI处理，比如显示游戏结束弹窗
+      }
+    );
+
+    // 处理清空抢答队列事件
+    wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
+      GameEventId.CLEAR_ANSWER_QUEUE,
+      () => {
+        setAnswerOrderByUserId({});
+        console.log("Answer queue cleared");
+      }
+    );
+
+    // 处理音频预加载事件
+    wsRef.current.onJsonEvent<PreloadAudioMessage>(
+      GameEventId.PRELOAD_AUDIO,
+      async (message) => {
+        const { audio_url } = message.data;
+        if (audio_url && audioRef.current) {
+          try {
+            await audioRef.current.preload(audio_url);
+            console.log(`Audio preloaded: ${audio_url}`);
+          } catch (error) {
+            console.error("Failed to preload audio:", error);
+          }
+        }
+      }
+    );
 
     wsRef.current.onConnectionStateChange(setConnected);
 

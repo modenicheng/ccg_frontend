@@ -33,6 +33,8 @@ export const GameEventId = {
   ANSWER_QUEUE: 37,
   ROUND_END: 38,
 
+  CLEAR_ANSWER_QUEUE: 53,
+
   JUDGING: 40,
   JUDGE_SUBMIT: 41,
   SCORE_UPDATE: 42,
