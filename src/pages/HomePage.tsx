@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
 import usePersistStore from "../stores/persistStore";
+import { syncRoomAuthToCookieAndSession } from "../utils/roomAuth";
 
 type HomeTab = "create" | "join" | "watch";
 
@@ -19,23 +20,6 @@ function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   const persistStore = usePersistStore();
-
-  const setCookie = (name: string, value: string) => {
-    const setWithDocumentCookie = () => {
-      // Only encode the value, not the name (colon ':' is valid in cookie names)
-      document.cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;
-    };
-    if (typeof cookieStore !== "undefined") {
-      try {
-        // cookieStore may default to Secure which fails on HTTP
-        cookieStore.set(name, value).catch(setWithDocumentCookie);
-      } catch {
-        setWithDocumentCookie();
-      }
-    } else {
-      setWithDocumentCookie();
-    }
-  };
 
   const handleCreateRoom = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -57,15 +41,11 @@ function HomePage() {
         hostName,
         title,
       });
-      setCookie(`ccg-room-token:${room.roomId}`, room.host.token);
-      setCookie(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
-      setCookie(`ccg-room-username:${room.roomId}`, room.host.username);
-      sessionStorage.setItem(`ccg-room-token:${room.roomId}`, room.host.token);
-      sessionStorage.setItem(`ccg-room-user-id:${room.roomId}`, `${room.host.id}`);
-      sessionStorage.setItem(
-        `ccg-room-username:${room.roomId}`,
-        room.host.username,
-      );
+      syncRoomAuthToCookieAndSession(room.roomId, {
+        id: room.host.id,
+        token: room.host.token,
+        username: room.host.username,
+      });
       persistStore.addUser({
         ...room.host,
         roomId: room.roomId,
@@ -96,18 +76,11 @@ function HomePage() {
     setError(null);
     try {
       const result = await joinRoom({ roomId, username });
-      setCookie(`ccg-room-token:${result.roomId}`, result.user.token);
-      setCookie(`ccg-room-user-id:${result.roomId}`, `${result.user.id}`);
-      setCookie(`ccg-room-username:${result.roomId}`, result.user.username);
-      sessionStorage.setItem(`ccg-room-token:${result.roomId}`, result.user.token);
-      sessionStorage.setItem(
-        `ccg-room-user-id:${result.roomId}`,
-        `${result.user.id}`,
-      );
-      sessionStorage.setItem(
-        `ccg-room-username:${result.roomId}`,
-        result.user.username,
-      );
+      syncRoomAuthToCookieAndSession(result.roomId, {
+        id: result.user.id,
+        token: result.user.token,
+        username: result.user.username,
+      });
       persistStore.addUser({
         ...result.user,
         roomId: result.roomId,
