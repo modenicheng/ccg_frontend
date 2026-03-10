@@ -30,6 +30,7 @@ import {
   getPlayersSimple,
   getTagGroupsSimple,
 } from "../types/wsMessages";
+import { syncRoomAuthToCookieAndSession } from "../utils/roomAuth";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -597,6 +598,23 @@ function RoomPage() {
   useEffect(() => {
     userIdRef.current = userId;
   }, [userId]);
+
+  useEffect(() => {
+    if (!roomId) {
+      return;
+    }
+
+    syncRoomAuthToCookieAndSession(
+      roomId,
+      user
+        ? {
+            id: user.id,
+            token: user.token,
+            username: user.username,
+          }
+        : null,
+    );
+  }, [roomId, user]);
 
   const switchAudioSourceIfNeeded = useCallback(
     async (nextAudioUrl: string) => {
