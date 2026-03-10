@@ -182,6 +182,7 @@ function RoomPage() {
   // 答题弹窗状态
   const [isAnswerModalOpen, setIsAnswerModalOpen] = useState<boolean>(false);
   const [isAnswerModalMinimized, setIsAnswerModalMinimized] = useState<boolean>(false);
+  const [currentAnsweringPlayer, setCurrentAnsweringPlayer] = useState<number | null>(null);
   const answerModalRef = useRef<HTMLDialogElement | null>(null);
 
   // 准备和倒计时状态
@@ -831,9 +832,12 @@ function RoomPage() {
       };
     }>(GameEventId.YOUR_TURN, (message) => {
       const turnUserId = message?.data?.user_id;
-      if (typeof turnUserId === "number" && turnUserId === userIdRef.current) {
-        setIsAnswerModalOpen(true);
-        setIsAnswerModalMinimized(false);
+      if (typeof turnUserId === "number") {
+        setCurrentAnsweringPlayer(turnUserId);
+        if (turnUserId === userIdRef.current) {
+          setIsAnswerModalOpen(true);
+          setIsAnswerModalMinimized(false);
+        }
       }
     });
 
@@ -1129,7 +1133,10 @@ function RoomPage() {
         setIsAnswerModalMinimized(false);
         setDescription("");
 
-        // 7. 隐藏判分界面和曲目信息
+        // 7. 重置正在回答的玩家状态
+        setCurrentAnsweringPlayer(null);
+
+        // 8. 隐藏判分界面和曲目信息
         setIsJudging(false);
         setCurrentSong(null);
 
@@ -1885,6 +1892,7 @@ function RoomPage() {
                           username={player.username}
                           order={order}
                           activate={typeof order === "number"}
+                          answering={currentAnsweringPlayer === player.id}
                           isSelf={isCurrentUser}
                         />
                         {isOwner && !isCurrentUser && (
