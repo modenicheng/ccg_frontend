@@ -1201,6 +1201,24 @@ function RoomPage() {
       }
     );
 
+    // 处理抢答队列更新事件
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.ANSWER_QUEUE;
+      ts: number;
+      data: {
+        queue: Array<{ player_id: number; order: number }>;
+      };
+    }>(GameEventId.ANSWER_QUEUE, (message) => {
+      if (message.data?.queue) {
+        const orderMap: Record<number, number> = {};
+        message.data.queue.forEach((item) => {
+          orderMap[item.player_id] = item.order;
+        });
+        setAnswerOrderByUserId(orderMap);
+        console.log("Answer queue updated:", orderMap);
+      }
+    });
+
     // 处理音频预加载事件
     wsRef.current.onJsonEvent<PreloadAudioMessage>(
       GameEventId.PRELOAD_AUDIO,
