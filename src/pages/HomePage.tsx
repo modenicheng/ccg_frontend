@@ -97,7 +97,10 @@ function HomePage() {
     <div className="min-h-screen flex items-center justify-center p-4">
       <div className="card w-full max-w-xl bg-base-100 shadow-xl">
         <div className="card-body gap-4">
-          <h1 className="card-title text-2xl">CCG 房间大厅</h1>
+          <div className="flex items-center gap-3">
+            <img src="/icon_01.svg" alt="CCG 图标" className="w-10 h-10" />
+            <h1 className="card-title text-2xl">CCG 房间大厅</h1>
+          </div>
           <p className="text-base-content/70">创建房间或快速加入已有房间。</p>
 
           <div role="tablist" className="tabs tabs-border">

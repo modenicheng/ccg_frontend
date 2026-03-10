@@ -1143,7 +1143,10 @@ const RoomManagePage = () => {
     <div className="min-h-screen bg-base-200">
       <nav className="navbar bg-base-100 shadow-sm px-4 md:px-6">
         <div className="navbar-start">
-          <h1 className="text-xl font-bold">猜猜歌 · 房间管理</h1>
+          <div className="flex items-center gap-3">
+            <img src="/icon_01.svg" alt="CCG 图标" className="w-8 h-8" />
+            <h1 className="text-xl font-bold">猜猜歌 · 房间管理</h1>
+          </div>
         </div>
         <div className="navbar-end gap-2">
           <button
