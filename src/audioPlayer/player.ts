@@ -1,5 +1,19 @@
 import { getCssVariable } from "../utils/color";
 
+interface FrequencyBandRange {
+  startBin: number;
+  endBin: number;
+  centerFrequency: number;
+  lowerFrequency: number;
+  upperFrequency: number;
+}
+
+interface FrequencyCurvePoint {
+  x: number;
+  y: number;
+  sampleCount?: number;
+}
+
 class audioPlayer {
   private audioCtx: AudioContext;
   private canvas?: HTMLCanvasElement;
@@ -9,10 +23,18 @@ class audioPlayer {
   private gainNode: GainNode;
   private analyserNode: AnalyserNode;
   private audioState: "suspended" | "running" | "closed" = "suspended";
-  private fftSize: number = 1024; // 修正命名
+  private fftSize: number = 8192; // 修正命名
+  private frequencyBandCount: number = 4096;
+  private minFrequencyHz: number = 20;
+  private lowFrequencyStretchExponent: number = 1;
+  private maxCurveSampleWindowSize: number = 16;
+  private minCurveSampleWindowSize: number = 1;
+  private highFrequencyMinPixelGap: number = 0.35;
   private smmothedData?: Float32Array;
   private smmothingFactor: number = 0.6; // 平滑因子，范围 [0, 1]，值越小越平滑
   private preloadTable: Record<string, HTMLAudioElement> = {}; // URL -> HTMLAudioElement
+  private frequencyBands: FrequencyBandRange[] = [];
+  private frequencyBandsCacheKey = "";
 
   private stateChangeCallback?: (state: string) => void;
   private endedCallback?: () => void;
@@ -123,6 +145,355 @@ class audioPlayer {
     return (Math.min(max, Math.max(min, value)) - min) / (max - min);
   }
 
+  private getBinFrequency(binIndex: number): number {
+    return (binIndex * this.audioCtx.sampleRate) / this.analyserNode.fftSize;
+  }
+
+  private getFrequencyBands(bufferLength: number): FrequencyBandRange[] {
+    const bandCount = Math.max(
+      1,
+      Math.min(this.frequencyBandCount, bufferLength),
+    );
+    const cacheKey = [
+      this.audioCtx.sampleRate,
+      this.analyserNode.fftSize,
+      bufferLength,
+      bandCount,
+      this.minFrequencyHz,
+    ].join(":");
+
+    if (this.frequencyBandsCacheKey === cacheKey) {
+      return this.frequencyBands;
+    }
+
+    const firstUsableFrequency = Math.max(
+      this.minFrequencyHz,
+      this.getBinFrequency(1),
+    );
+    const maxFrequency = this.audioCtx.sampleRate / 2;
+    const minLog = Math.log10(firstUsableFrequency);
+    const maxLog = Math.log10(maxFrequency);
+
+    this.frequencyBands = Array.from({ length: bandCount }, (_, index) => {
+      const startRatio = index / bandCount;
+      const endRatio = (index + 1) / bandCount;
+      const lowerFrequency = Math.pow(
+        10,
+        minLog + (maxLog - minLog) * startRatio,
+      );
+      const upperFrequency = Math.pow(
+        10,
+        minLog + (maxLog - minLog) * endRatio,
+      );
+      const centerFrequency = Math.sqrt(lowerFrequency * upperFrequency);
+
+      let startBin = Math.max(
+        1,
+        Math.ceil(
+          (lowerFrequency * this.analyserNode.fftSize) / this.audioCtx.sampleRate,
+        ),
+      );
+      let endBin = Math.min(
+        bufferLength - 1,
+        Math.floor(
+          (upperFrequency * this.analyserNode.fftSize) / this.audioCtx.sampleRate,
+        ),
+      );
+
+      if (endBin < startBin) {
+        const nearestBin = Math.min(
+          bufferLength - 1,
+          Math.max(
+            1,
+            Math.round(
+              (centerFrequency * this.analyserNode.fftSize) /
+                this.audioCtx.sampleRate,
+            ),
+          ),
+        );
+        startBin = nearestBin;
+        endBin = nearestBin;
+      }
+
+      return {
+        startBin,
+        endBin,
+        centerFrequency,
+        lowerFrequency,
+        upperFrequency,
+      };
+    });
+    this.frequencyBandsCacheKey = cacheKey;
+
+    return this.frequencyBands;
+  }
+
+  private aggregateFrequencyBands(frequencyData: Float32Array): Float32Array {
+    const bands = this.getFrequencyBands(frequencyData.length);
+    const aggregatedData = new Float32Array(bands.length);
+
+    for (let bandIndex = 0; bandIndex < bands.length; bandIndex++) {
+      const band = bands[bandIndex];
+      let totalPower = 0;
+
+      for (let binIndex = band.startBin; binIndex <= band.endBin; binIndex++) {
+        const dbValue = frequencyData[binIndex];
+        if (!isFinite(dbValue)) {
+          continue;
+        }
+        totalPower += Math.pow(10, dbValue / 10);
+      }
+
+      const bandDb = 10 * Math.log10(Math.max(totalPower, Number.EPSILON));
+      aggregatedData[bandIndex] = this.normalize(bandDb, -120, 20);
+    }
+
+    return aggregatedData;
+  }
+
+  private getDynamicCurveSampleWindowSize(
+    frequency: number,
+    minFrequency: number,
+    maxFrequency: number,
+  ): number {
+    const safeFrequency = Math.max(minFrequency, frequency);
+    const safeMaxFrequency = Math.max(minFrequency + Number.EPSILON, maxFrequency);
+    const minLog = Math.log10(minFrequency);
+    const maxLog = Math.log10(safeMaxFrequency);
+    const normalizedFrequency =
+      maxLog === minLog
+        ? 0
+        : (Math.log10(safeFrequency) - minLog) / (maxLog - minLog);
+    const clampedRatio = Math.min(1, Math.max(0, normalizedFrequency));
+    const dynamicWindowSize =
+      this.maxCurveSampleWindowSize *
+      Math.pow(
+        this.minCurveSampleWindowSize / this.maxCurveSampleWindowSize,
+        clampedRatio,
+      );
+
+    return Math.max(
+      this.minCurveSampleWindowSize,
+      Math.min(this.maxCurveSampleWindowSize, Math.round(dynamicWindowSize)),
+    );
+  }
+
+  private getFrequencyCurvePoints(
+    width: number,
+    height: number,
+    bands: FrequencyBandRange[],
+    values: Float32Array,
+  ): FrequencyCurvePoint[] {
+    if (bands.length === 0 || values.length === 0) {
+      return [];
+    }
+
+    const minCenterFrequency = Math.max(this.minFrequencyHz, bands[0].centerFrequency);
+    const maxCenterFrequency = Math.max(
+      minCenterFrequency + Number.EPSILON,
+      bands[bands.length - 1].centerFrequency,
+    );
+    const minLog = Math.log10(minCenterFrequency);
+    const maxLog = Math.log10(maxCenterFrequency);
+    const topPadding = height * 0.08;
+    const bottomPadding = height * 0.04;
+    const drawableHeight = Math.max(1, height - topPadding - bottomPadding);
+
+    const mapFrequencyToCanvasX = (frequency: number) => {
+      const normalizedLogX =
+        maxLog === minLog
+          ? 0
+          : (Math.log10(Math.max(frequency, minCenterFrequency)) - minLog) /
+            (maxLog - minLog);
+      const stretchedX = Math.pow(
+        Math.min(1, Math.max(0, normalizedLogX)),
+        this.lowFrequencyStretchExponent,
+      );
+      return stretchedX * width;
+    };
+
+    const groupedPoints: FrequencyCurvePoint[] = [];
+    let bandIndex = 0;
+
+    while (bandIndex < bands.length) {
+      const sampleWindowSize = this.getDynamicCurveSampleWindowSize(
+        bands[bandIndex].centerFrequency,
+        minCenterFrequency,
+        maxCenterFrequency,
+      );
+      let totalSamples = 0;
+      let totalX = 0;
+      let totalY = 0;
+      let sampledBands = 0;
+
+      while (
+        bandIndex < bands.length &&
+        sampledBands < sampleWindowSize
+      ) {
+        const normalizedValue = Math.min(1, Math.max(0, values[bandIndex] ?? 0));
+        const pointX = mapFrequencyToCanvasX(bands[bandIndex].centerFrequency);
+        const pointY =
+          height - bottomPadding - normalizedValue * drawableHeight;
+
+        totalX += pointX;
+        totalY += pointY;
+        totalSamples += 1;
+        sampledBands += 1;
+        bandIndex += 1;
+      }
+
+      groupedPoints.push({
+        x: totalX / Math.max(1, totalSamples),
+        y: totalY / Math.max(1, totalSamples),
+        sampleCount: totalSamples,
+      });
+    }
+
+    const mergedPoints: FrequencyCurvePoint[] = [];
+    for (const point of groupedPoints) {
+      const lastPoint = mergedPoints[mergedPoints.length - 1];
+      if (
+        lastPoint &&
+        Math.abs(point.x - lastPoint.x) < this.highFrequencyMinPixelGap
+      ) {
+        const totalSamples =
+          (lastPoint.sampleCount ?? 1) + (point.sampleCount ?? 1);
+        lastPoint.x =
+          (lastPoint.x * (lastPoint.sampleCount ?? 1) +
+            point.x * (point.sampleCount ?? 1)) /
+          totalSamples;
+        lastPoint.y =
+          (lastPoint.y * (lastPoint.sampleCount ?? 1) +
+            point.y * (point.sampleCount ?? 1)) /
+          totalSamples;
+        lastPoint.sampleCount = totalSamples;
+      } else {
+        mergedPoints.push({ ...point });
+      }
+    }
+
+    const smoothedPoints = mergedPoints.map((point, index, points) => {
+      const previousPoint = points[Math.max(0, index - 2)];
+      const previousNearPoint = points[Math.max(0, index - 1)];
+      const nextNearPoint = points[Math.min(points.length - 1, index + 1)];
+      const nextPoint = points[Math.min(points.length - 1, index + 2)];
+
+      const smoothedY =
+        (previousPoint.y +
+          previousNearPoint.y * 2 +
+          point.y * 3 +
+          nextNearPoint.y * 2 +
+          nextPoint.y) /
+        9;
+
+      return {
+        x: point.x,
+        y: smoothedY,
+      };
+    });
+
+    if (smoothedPoints.length === 0) {
+      return smoothedPoints;
+    }
+
+    const anchoredPoints = [...smoothedPoints];
+    if (anchoredPoints[0].x > 0) {
+      anchoredPoints.unshift({
+        x: 0,
+        y: anchoredPoints[0].y,
+      });
+    } else {
+      anchoredPoints[0] = {
+        x: 0,
+        y: anchoredPoints[0].y,
+      };
+    }
+
+    return anchoredPoints;
+  }
+
+  private traceBezierCurve(
+    ctx: CanvasRenderingContext2D,
+    points: FrequencyCurvePoint[],
+  ) {
+    if (points.length === 0) {
+      return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+
+    if (points.length === 1) {
+      return;
+    }
+
+    if (points.length === 2) {
+      ctx.lineTo(points[1].x, points[1].y);
+      return;
+    }
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const currentPoint = points[i];
+      const nextPoint = points[i + 1];
+      const midpointX = (currentPoint.x + nextPoint.x) / 2;
+      const midpointY = (currentPoint.y + nextPoint.y) / 2;
+
+      ctx.quadraticCurveTo(
+        currentPoint.x,
+        currentPoint.y,
+        midpointX,
+        midpointY,
+      );
+    }
+
+    const penultimatePoint = points[points.length - 2];
+    const lastPoint = points[points.length - 1];
+    ctx.quadraticCurveTo(
+      penultimatePoint.x,
+      penultimatePoint.y,
+      lastPoint.x,
+      lastPoint.y,
+    );
+  }
+
+  private drawFrequencyCurve(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    bands: FrequencyBandRange[],
+    values: Float32Array,
+  ) {
+    const points = this.getFrequencyCurvePoints(width, height, bands, values);
+    if (points.length === 0) {
+      return;
+    }
+
+    const primaryColor = getCssVariable("--color-primary");
+    // const baseColor = getCssVariable("--color-base-100");
+    const baselineY = height;
+
+    this.traceBezierCurve(ctx, points);
+    ctx.lineWidth = Math.max(2, width * 0.001);
+    ctx.strokeStyle = `color-mix(in lch, ${primaryColor} 45%, transparent)`;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(
+      0.3,
+      `color-mix(in oklch, ${primaryColor} 40%, transparent)`,
+    );
+    gradient.addColorStop(1, "transparent");
+
+    this.traceBezierCurve(ctx, points);
+    ctx.lineTo(points[points.length - 1].x, baselineY);
+    ctx.lineTo(points[0].x, baselineY);
+    ctx.closePath();
+    ctx.fillStyle = gradient;
+    ctx.fill();
+  }
+
   drawCanvas() {
     if (!this.analyserNode || !this.canvasCtx || !this.canvas) return;
     const ctx = this.canvasCtx;
@@ -135,25 +506,26 @@ class audioPlayer {
     const data = new Float32Array(bufferLength);
     this.analyserNode.getFloatFrequencyData(data);
 
-    for (let i = 0; i < bufferLength; i++) {
-      // data[i] = Math.pow(10, data[i] / 20);
-      data[i] = this.normalize(data[i]);
-    }
-    // console.debug("Logged dB values:", data.subarray(0, 10)); // 仅打印前10个值
-    for (let i = 0; i < bufferLength; i++) {
-      if (!isFinite(data[i])) {
-        console.warn(`Non-finite value at index ${i}: ${data[i]}.`);
-      } else if (data[i] < 0) {
-        console.warn(`Negative value at index ${i}: ${data[i]}.`);
+    const aggregatedData = this.aggregateFrequencyBands(data);
+    const bands = this.getFrequencyBands(bufferLength);
+
+    for (let i = 0; i < aggregatedData.length; i++) {
+      if (!isFinite(aggregatedData[i])) {
+        console.warn(`Non-finite value at index ${i}: ${aggregatedData[i]}.`);
+      } else if (aggregatedData[i] < 0) {
+        console.warn(`Negative value at index ${i}: ${aggregatedData[i]}.`);
       }
     }
 
-    if (!this.smmothedData || this.smmothedData.length !== bufferLength) {
-      this.smmothedData = new Float32Array(data.buffer, 0, bufferLength);
+    if (
+      !this.smmothedData ||
+      this.smmothedData.length !== aggregatedData.length
+    ) {
+      this.smmothedData = new Float32Array(aggregatedData);
     } else {
-      for (let i = 0; i < bufferLength; i++) {
+      for (let i = 0; i < aggregatedData.length; i++) {
         this.smmothedData[i] =
-          this.smmothingFactor * data[i] +
+          this.smmothingFactor * aggregatedData[i] +
           (1 - this.smmothingFactor) * this.smmothedData[i];
       }
     }
@@ -163,24 +535,7 @@ class audioPlayer {
     ctx.fillStyle = getCssVariable("--color-base-100");
     ctx.fillRect(0, 0, width, height);
 
-    // 计算柱子宽度，留出间距
-    const barCount = bufferLength;
-    const gap = 0; // 柱子间隙（像素）
-    const barWidth = (width - gap * (barCount - 1)) / barCount; // 动态计算每个柱子宽度
-    if (barWidth <= 0) return;
-
-    let x = 0;
-    for (let i = 0; i < bufferLength; i++) {
-      // 将 0-255 映射到 0-1 并乘以高度
-      const barHeight = this.smmothedData[i] * height;
-
-      ctx.fillStyle = `color-mix(in lch, ${getCssVariable("--color-primary")} 20%, ${getCssVariable("--color-base-100")})`;
-      // console.log(`Drawing bar ${i}: height=${barHeight.toFixed(2)}, color=${ctx.fillStyle}`);
-      // ctx.fillStyle = `hsl(${(i / bufferLength) * 360}, 100%, 50%)`; // 彩虹色
-      // 绘制柱子（x 为当前起始位置）
-      ctx.fillRect(x, height - barHeight, barWidth, barHeight);
-      x += barWidth + gap;
-    }
+    this.drawFrequencyCurve(ctx, width, height, bands, this.smmothedData);
   }
 
   /**
@@ -415,6 +770,17 @@ class audioPlayer {
     }
     this.fftSize = size;
     this.analyserNode.fftSize = size;
+    this.frequencyBandsCacheKey = "";
+    this.frequencyBands = [];
+    this.smmothedData = undefined;
+  }
+
+  set setFrequencyBandCount(count: number) {
+    const nextCount = Math.max(1, Math.floor(count));
+    this.frequencyBandCount = nextCount;
+    this.frequencyBandsCacheKey = "";
+    this.frequencyBands = [];
+    this.smmothedData = undefined;
   }
 
   set onStateChange(callback: (state: string) => void) {

@@ -42,7 +42,7 @@ export function SongInfoCard({
   className = "",
   showAlbum = true,
   showPlatformHint = true,
-  defaultCoverUrl = "https://via.placeholder.com/128x128/cccccc/666666?text=?",
+  defaultCoverUrl = "/icon_01.svg",
 }: SongInfoCardProps) {
   // 如果没有曲目信息，显示占位符
   void _isJudging;

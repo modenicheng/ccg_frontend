@@ -40,6 +40,7 @@ const PRELOAD_DEDUP_WINDOW_MS = 3000;
 const VOLUME_HOTKEY_STEP = 5;
 const VOLUME_TOAST_HIDE_DELAY_MS = 3000;
 const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
+const ROOM_ID_COPY_FEEDBACK_MS = 1800;
 
 let domProgressPercent = 0;
 const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
@@ -91,6 +92,30 @@ const parseErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const copyTextToClipboard = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "true");
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) {
+      throw new Error("execCommand copy failed");
+    }
+  } finally {
+    document.body.removeChild(textArea);
+  }
+};
+
 function RoomPage() {
   const { roomid } = useParams();
   const roomId = roomid?.trim() ?? "";
@@ -129,7 +154,7 @@ function RoomPage() {
     (Number.isFinite(fallbackUserIdFromCookie)
       ? fallbackUserIdFromCookie
       : null);
-  
+
   // 简化身份鉴权：仅判定是否为房主
   const isOwner = user?.isOwner || false;
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
@@ -181,8 +206,11 @@ function RoomPage() {
 
   // 答题弹窗状态
   const [isAnswerModalOpen, setIsAnswerModalOpen] = useState<boolean>(false);
-  const [isAnswerModalMinimized, setIsAnswerModalMinimized] = useState<boolean>(false);
-  const [currentAnsweringPlayer, setCurrentAnsweringPlayer] = useState<number | null>(null);
+  const [isAnswerModalMinimized, setIsAnswerModalMinimized] =
+    useState<boolean>(false);
+  const [currentAnsweringPlayer, setCurrentAnsweringPlayer] = useState<
+    number | null
+  >(null);
   const answerModalRef = useRef<HTMLDialogElement | null>(null);
 
   // 准备和倒计时状态
@@ -230,8 +258,12 @@ function RoomPage() {
     useState<boolean>(false);
   const [isVolumeToastClosing, setIsVolumeToastClosing] =
     useState<boolean>(false);
+  const [roomIdCopyState, setRoomIdCopyState] = useState<
+    "idle" | "success" | "error"
+  >("idle");
   const volumeToastHideTimerRef = useRef<number | null>(null);
   const volumeToastExitTimerRef = useRef<number | null>(null);
+  const roomIdCopyTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
   const isWsDisconnected = !isConnected;
 
@@ -376,17 +408,30 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [isConnected, getCalibratedNow, userId, isReady]);
 
-  const handleRemovePlayer = useCallback((playerId: number) => {
-    if (!isConnected || !wsRef.current?.isConnected() || !isOwner || playerId === userId) {
-      return;
-    }
+  const handleRemovePlayer = useCallback(
+    (playerId: number) => {
+      if (
+        !isConnected ||
+        !wsRef.current?.isConnected() ||
+        !isOwner ||
+        playerId === userId
+      ) {
+        return;
+      }
 
-    setPlayerToRemove(playerId);
-    removePlayerDialogRef.current?.showModal();
-  }, [isConnected, isOwner, userId]);
+      setPlayerToRemove(playerId);
+      removePlayerDialogRef.current?.showModal();
+    },
+    [isConnected, isOwner, userId],
+  );
 
   const confirmRemovePlayer = useCallback(() => {
-    if (!isConnected || !wsRef.current?.isConnected() || !isOwner || playerToRemove === null) {
+    if (
+      !isConnected ||
+      !wsRef.current?.isConnected() ||
+      !isOwner ||
+      playerToRemove === null
+    ) {
       return;
     }
 
@@ -421,42 +466,9 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [getCalibratedNow, roomState?.statusCode, isOwner]);
 
-  // const handleLeaveRoom = useCallback(async () => {
-  //   if (!roomId || userId === null) {
-  //     return;
-  //   }
-
-  //   try {
-  //     // 发送退出房间事件
-  //     if (wsRef.current?.isConnected()) {
-  //       await wsRef.current.sendJson({
-  //         event: 16, // PLAYER_LEAVE
-  //         data: { user_id: userId },
-  //       });
-  //     }
-
-  //     // 关闭WebSocket连接
-  //     wsRef.current?.close();
-
-  //     // 清除本地存储的房间相关信息
-  //     sessionStorage.removeItem(`ccg-room-token:${roomId}`);
-  //     sessionStorage.removeItem(`ccg-room-user-id:${roomId}`);
-  //     document.cookie = `ccg-room-user-id:${roomId}=; Max-Age=0`;
-
-  //     // 导航回首页
-  //     navigate("/");
-  //   } catch (error) {
-  //     console.error("退出房间失败:", error);
-  //   }
-  // }, [roomId, userId, navigate]);
-
   const sendPlaybackControl = useCallback(
     async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
-      if (
-        !isOwner ||
-        !wsRef.current?.isConnected() ||
-        !audioRef.current
-      ) {
+      if (!isOwner || !wsRef.current?.isConnected() || !audioRef.current) {
         return;
       }
 
@@ -681,8 +693,12 @@ function RoomPage() {
           statusCode: payload.status,
 
           // 回合状态
-          roundState: typeof payload.round_state === "string" ? payload.round_state : "PENDING",
-          roundStateCode: typeof payload.round_state === "number" ? payload.round_state : 0,
+          roundState:
+            typeof payload.round_state === "string"
+              ? payload.round_state
+              : "PENDING",
+          roundStateCode:
+            typeof payload.round_state === "number" ? payload.round_state : 0,
 
           // 播放相关
           song_start_range_percent: payload.song_start_range_percent,
@@ -892,22 +908,25 @@ function RoomPage() {
 
       // 存储玩家作答情况
       if (message.data?.player_answers) {
-        setPlayerAnswers(message.data.player_answers.map(answer => ({
-          playerId: answer.player_id,
-          username: answer.username,
-          answers: answer.answers,
-          description: answer.description,
-          order: answer.order
-        })));
+        setPlayerAnswers(
+          message.data.player_answers.map((answer) => ({
+            playerId: answer.player_id,
+            username: answer.username,
+            answers: answer.answers,
+            description: answer.description,
+            order: answer.order,
+          })),
+        );
       } else {
         // 如果没有player_answers，尝试从player_descriptions构建
-        const playerAnswersFromDescriptions = message.data?.player_descriptions?.map((desc, index) => ({
-          playerId: desc.id,
-          username: desc.username,
-          answers: {},
-          description: desc.description,
-          order: index + 1
-        })) || [];
+        const playerAnswersFromDescriptions =
+          message.data?.player_descriptions?.map((desc, index) => ({
+            playerId: desc.id,
+            username: desc.username,
+            answers: {},
+            description: desc.description,
+            order: index + 1,
+          })) || [];
         setPlayerAnswers(playerAnswersFromDescriptions);
       }
 
@@ -1078,8 +1097,6 @@ function RoomPage() {
       }
     });
 
-
-
     // 处理回合开始事件
     wsRef.current.onJsonEvent<RoundStartMessage>(
       GameEventId.ROUND_START,
@@ -1090,7 +1107,10 @@ function RoomPage() {
         const roundData = message.data;
 
         // 1. 切换到新音频URL（如果提供）
-        if (roundData.audio_url && roundData.audio_url !== currentAudioUrlRef.current) {
+        if (
+          roundData.audio_url &&
+          roundData.audio_url !== currentAudioUrlRef.current
+        ) {
           try {
             logAudioTrigger("ROUND_START", roundData.audio_url);
             await switchAudioSourceIfNeeded(roundData.audio_url);
@@ -1153,12 +1173,19 @@ function RoomPage() {
       ts: number;
       data: {
         round_state: 0 | 1 | 2 | 3 | 4;
-        round_state_name: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
+        round_state_name:
+          | "PENDING"
+          | "PLAYING_AUDIO"
+          | "ANSWERING"
+          | "JUDGING"
+          | "COMPLETED";
       };
     }>(GameEventId.ROUND_STATE_UPDATE, (message) => {
       const { round_state, round_state_name } = message.data;
       gameStore.getState().setRoundState(round_state_name, round_state);
-      console.log(`Round state updated: ${round_state_name} (code: ${round_state})`);
+      console.log(
+        `Round state updated: ${round_state_name} (code: ${round_state})`,
+      );
     });
 
     // 处理起始位置更新事件
@@ -1175,7 +1202,7 @@ function RoomPage() {
           });
         }
         console.log(`Start position updated: ${start_position_percent}%`);
-      }
+      },
     );
 
     // 处理游戏结束事件
@@ -1196,7 +1223,7 @@ function RoomPage() {
         gameStore.getState().setScores(final_scores);
         console.log(`Game over with final scores:`, final_scores);
         // 这里可以添加游戏结束的UI处理，比如显示游戏结束弹窗
-      }
+      },
     );
 
     // 处理清空抢答队列事件
@@ -1205,7 +1232,7 @@ function RoomPage() {
       () => {
         setAnswerOrderByUserId({});
         console.log("Answer queue cleared");
-      }
+      },
     );
 
     // 处理抢答队列更新事件
@@ -1261,7 +1288,7 @@ function RoomPage() {
             );
           }
         }
-      }
+      },
     );
 
     wsRef.current.onConnectionStateChange(setConnected);
@@ -1468,15 +1495,18 @@ function RoomPage() {
     }, VOLUME_TOAST_HIDE_DELAY_MS);
   }, []);
 
-  const setVolume = useCallback((value: number) => {
-    const safeValue = Math.max(0, Math.min(200, value));
-    setLocalVolume(safeValue);
-    setPersistVolume(safeValue);
+  const setVolume = useCallback(
+    (value: number) => {
+      const safeValue = Math.max(0, Math.min(200, value));
+      setLocalVolume(safeValue);
+      setPersistVolume(safeValue);
 
-    if (audioRef.current) {
-      audioRef.current.volume = safeValue;
-    }
-  }, [setPersistVolume]);
+      if (audioRef.current) {
+        audioRef.current.volume = safeValue;
+      }
+    },
+    [setPersistVolume],
+  );
 
   const adjustVolume = useCallback(
     (delta: number) => {
@@ -1494,6 +1524,30 @@ function RoomPage() {
     [setPersistVolume],
   );
 
+  const handleCopyRoomId = useCallback(async () => {
+    if (!roomId) {
+      return;
+    }
+
+    if (roomIdCopyTimerRef.current !== null) {
+      window.clearTimeout(roomIdCopyTimerRef.current);
+      roomIdCopyTimerRef.current = null;
+    }
+
+    try {
+      await copyTextToClipboard(roomId);
+      setRoomIdCopyState("success");
+    } catch (error) {
+      console.error("Failed to copy room id:", error);
+      setRoomIdCopyState("error");
+    }
+
+    roomIdCopyTimerRef.current = window.setTimeout(() => {
+      setRoomIdCopyState("idle");
+      roomIdCopyTimerRef.current = null;
+    }, ROOM_ID_COPY_FEEDBACK_MS);
+  }, [roomId]);
+
   useEffect(() => {
     return () => {
       if (volumeToastHideTimerRef.current !== null) {
@@ -1503,6 +1557,10 @@ function RoomPage() {
       if (volumeToastExitTimerRef.current !== null) {
         window.clearTimeout(volumeToastExitTimerRef.current);
         volumeToastExitTimerRef.current = null;
+      }
+      if (roomIdCopyTimerRef.current !== null) {
+        window.clearTimeout(roomIdCopyTimerRef.current);
+        roomIdCopyTimerRef.current = null;
       }
     };
   }, []);
@@ -1682,7 +1740,7 @@ function RoomPage() {
         />
         {isOwner ? (
           <div className="card shadow-sm min-w-xs">
-            <div className="card-body">
+            <div className="card-body user-drag-none">
               <button
                 type="button"
                 className={clsx("btn btn-sm btn-soft", {
@@ -1770,16 +1828,55 @@ function RoomPage() {
             </h2>
             <div className="divider m-0"></div>
             <div>房主： {roomOwner}</div>
-            <div className="text-sm ">房间ID： {roomId}</div>
+            <div className="flex items-center gap-1.5 text-sm">
+              <span>
+                房间ID： <span className="font-mono">{roomId}</span>
+              </span>
+              <button
+                type="button"
+                className={clsx("btn btn-ghost btn-xs btn-square", {
+                  "text-success": roomIdCopyState === "success",
+                  "text-error": roomIdCopyState === "error",
+                })}
+                onClick={handleCopyRoomId}
+                title={
+                  roomIdCopyState === "success"
+                    ? "已复制"
+                    : roomIdCopyState === "error"
+                      ? "复制失败"
+                      : "复制房间ID"
+                }
+                aria-label={`复制房间ID ${roomId}`}
+              >
+                <Icon
+                  icon={
+                    roomIdCopyState === "success"
+                      ? "heroicons:clipboard-document-check"
+                      : roomIdCopyState === "error"
+                        ? "heroicons:exclamation-circle"
+                        : "heroicons:clipboard-document"
+                  }
+                  width={16}
+                  height={16}
+                />
+              </button>
+            </div>
             <div className="text-sm mt-2">
-              回合状态： 
-              <span className={clsx("px-2 py-0.5 rounded text-xs font-medium", {
-                "bg-blue-100 text-blue-800": gameStore.getState().roundState === "PENDING",
-                "bg-green-100 text-green-800": gameStore.getState().roundState === "PLAYING_AUDIO",
-                "bg-yellow-100 text-yellow-800": gameStore.getState().roundState === "ANSWERING",
-                "bg-purple-100 text-purple-800": gameStore.getState().roundState === "JUDGING",
-                "bg-gray-100 text-gray-800": gameStore.getState().roundState === "COMPLETED",
-              })}>
+              回合状态：
+              <span
+                className={clsx("px-2 py-0.5 rounded text-xs font-medium", {
+                  "bg-blue-100 text-blue-800":
+                    gameStore.getState().roundState === "PENDING",
+                  "bg-green-100 text-green-800":
+                    gameStore.getState().roundState === "PLAYING_AUDIO",
+                  "bg-yellow-100 text-yellow-800":
+                    gameStore.getState().roundState === "ANSWERING",
+                  "bg-purple-100 text-purple-800":
+                    gameStore.getState().roundState === "JUDGING",
+                  "bg-gray-100 text-gray-800":
+                    gameStore.getState().roundState === "COMPLETED",
+                })}
+              >
                 {gameStore.getState().roundState}
               </span>
             </div>
@@ -1788,7 +1885,7 @@ function RoomPage() {
                 type="button"
                 className={clsx("btn btn-soft btn-sm join-item flex-1", {
                   "btn-success": isReady,
-                  "btn-primary": !isReady
+                  "btn-primary": !isReady,
                 })}
                 onClick={handleReady}
                 disabled={!isConnected}
@@ -1810,7 +1907,8 @@ function RoomPage() {
           <button
             type="button"
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
-              "btn-disabled": !isConnected || isCurrentPlayerInAnswerQueue || !user,
+              "btn-disabled":
+                !isConnected || isCurrentPlayerInAnswerQueue || !user,
               "btn-active": isBuzzHotkeyActive,
             })}
             disabled={!isConnected || isCurrentPlayerInAnswerQueue || !user}
@@ -1843,9 +1941,13 @@ function RoomPage() {
                   [...scores]
                     .sort((a, b) => b.score - a.score)
                     .map((player, index) => (
-                      <tr key={player.player_id} className={clsx({
-                        'bg-primary/10 font-bold': userId !== null && player.player_id === userId
-                      })}>
+                      <tr
+                        key={player.player_id}
+                        className={clsx({
+                          "bg-primary/10 font-bold":
+                            userId !== null && player.player_id === userId,
+                        })}
+                      >
                         <th className="text-end">{index + 1}</th>
                         <th className="text-nowrap">{player.username}</th>
                         <td className="text-end">{player.score}</td>
@@ -1923,8 +2025,6 @@ function RoomPage() {
         </div>
       </div>
 
-
-
       {/* 玩家作答情况展示表格 */}
       <div className="card shadow-sm">
         <div className="card-body p-0">
@@ -1956,22 +2056,28 @@ function RoomPage() {
                   playerAnswers
                     .sort((a, b) => a.order - b.order)
                     .map((answer) => (
-                      <tr key={answer.playerId} className={clsx({
-                        'bg-primary/10 font-bold': userId !== null && answer.playerId === userId
-                      })}>
+                      <tr
+                        key={answer.playerId}
+                        className={clsx({
+                          "bg-primary/10 font-bold":
+                            userId !== null && answer.playerId === userId,
+                        })}
+                      >
                         <th className="text-end">{answer.order}</th>
                         <th className="text-nowrap">{answer.username}</th>
                         {tagGroups.map((group) => {
                           const selectedTagId = answer.answers[group.id];
-                          const selectedTag = group.tags.find(tag => tag.id === selectedTagId);
+                          const selectedTag = group.tags.find(
+                            (tag) => tag.id === selectedTagId,
+                          );
                           return (
                             <td key={group.id} className="text-center">
-                              {selectedTag ? selectedTag.name : '-'}
+                              {selectedTag ? selectedTag.name : "-"}
                             </td>
                           );
                         })}
                         <td className="max-w-40 truncate">
-                          {answer.description || '-'}
+                          {answer.description || "-"}
                         </td>
                       </tr>
                     ))
@@ -2015,8 +2121,7 @@ function RoomPage() {
               <progress
                 className={clsx("progress w-full volume-progress-eased", {
                   "progress-primary": localVolume <= 100,
-                  "progress-warning":
-                    localVolume > 100 && localVolume <= 150,
+                  "progress-warning": localVolume > 100 && localVolume <= 150,
                   "progress-error": localVolume > 150,
                 })}
                 value={localVolume}
@@ -2212,9 +2317,7 @@ function RoomPage() {
       <dialog ref={skipConfirmDialogRef} className="modal">
         <div className="modal-box max-w-md">
           <h3 className="font-bold text-lg">确认进入下一轮</h3>
-          <p className="py-4">
-            确定立即进入下一轮吗？当前抢答队列会被清空。
-          </p>
+          <p className="py-4">确定立即进入下一轮吗？当前抢答队列会被清空。</p>
           <div className="flex justify-end gap-3">
             <button
               type="button"
@@ -2295,11 +2398,15 @@ function RoomPage() {
       </dialog>
 
       {/* 答题弹窗 */}
-      <dialog ref={answerModalRef} className="modal" open={isAnswerModalOpen && !isAnswerModalMinimized}>
+      <dialog
+        ref={answerModalRef}
+        className="modal"
+        open={isAnswerModalOpen && !isAnswerModalMinimized}
+      >
         <div className="modal-box w-11/12 max-w-4xl">
           <h2 className="font-bold text-2xl">答题</h2>
           <div className="divider mt-0.5 mb-4"></div>
-          
+
           <TagGroupSelector
             tagGroups={tagGroups}
             selectedTags={selectedTagByGroup}
