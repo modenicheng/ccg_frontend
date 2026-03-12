@@ -95,7 +95,7 @@ export type PlayControlMessage = PlayMessage | PauseMessage | SeekMessage;
 export interface RoundStartData {
   round_index: number;
   audio_url: string | null;
-  start_pertent: number;  // 注意：后端字段名可能为拼写错误，暂时保持一致
+  start_percent: number;
 }
 
 export interface RoundStartMessage {
@@ -106,6 +106,7 @@ export interface RoundStartMessage {
 
 export interface AttemptAnswerMessageData {
   offset_ts: number;
+  progress_ms: number;
   user_id: number;
 }
 
@@ -113,6 +114,28 @@ export interface AttemptAnswerMessage {
   event: typeof GameEventId.ATTEMPT_ANSWER;
   ts: number;
   data: AttemptAnswerMessageData;
+}
+
+export interface YourTurnMessageData {
+  user_id: number;
+}
+
+export interface YourTurnMessage {
+  event: typeof GameEventId.YOUR_TURN;
+  ts: number;
+  data: YourTurnMessageData;
+}
+
+export interface AnswerBroadcastMessageData {
+  player_id: string;
+  selected_tag_ids: number[];
+  description_text: string | null;
+}
+
+export interface AnswerBroadcastMessage {
+  event: typeof GameEventId.ANSWER_BROADCAST;
+  ts: number;
+  data: AnswerBroadcastMessageData;
 }
 
 export interface JudgingMessageData {
@@ -262,6 +285,8 @@ export type WsMessage =
   | PlayControlMessage
   | RoundStartMessage
   | AttemptAnswerMessage
+  | YourTurnMessage
+  | AnswerBroadcastMessage
   | JudgingMessage
   | ScoreUpdateMessage
   | RoundStateUpdateMessage

@@ -89,10 +89,10 @@ class WS {
       this.reconnect();
     };
     this.conn.onmessage = async (ev: MessageEvent) => {
-      console.debug(`Received message: \n`, ev.data);
+      // console.debug(`Received message: \n`, ev.data);
       if (ev.data instanceof Blob) {
         const arrayBuffer = await ev.data.arrayBuffer();
-        console.debug(`Received binary message: \n`, arrayBuffer);
+        // console.debug(`Received binary message: \n`, arrayBuffer);
         const view = new DataView(arrayBuffer);
         const eventType = view.getUint8(0) as EventType;
         const handler = this.handlers.get(eventType);
@@ -100,7 +100,9 @@ class WS {
           if (typeof handler === "function") {
             await handler(arrayBuffer, this);
           } else {
-            console.warn(`Handler for event type ${eventType} is not a function`);
+            console.warn(
+              `Handler for event type ${eventType} is not a function`,
+            );
           }
         } else {
           console.warn(`No handler registered for event type ${eventType}`);
@@ -110,15 +112,21 @@ class WS {
         try {
           message = JSON.parse(ev.data);
         } catch (e) {
-          console.error(`Failed to parse JSON message: ${(e as Error).message}`);
+          console.error(
+            `Failed to parse JSON message: ${(e as Error).message}`,
+          );
           return;
         }
         console.debug(`Received text message: \n`, message);
 
         const messageType =
-          message && typeof message === "object" ? (message.type as string | undefined) : undefined;
+          message && typeof message === "object"
+            ? (message.type as string | undefined)
+            : undefined;
         const messageEvent =
-          message && typeof message === "object" ? (message.event as GameEventId | undefined) : undefined;
+          message && typeof message === "object"
+            ? (message.event as GameEventId | undefined)
+            : undefined;
 
         if (messageType) {
           const jsonHandler = this.jsonHandlers.get(messageType);
@@ -126,7 +134,9 @@ class WS {
             if (typeof jsonHandler === "function") {
               await jsonHandler(message, this);
             } else {
-              console.warn(`Handler for JSON message type ${messageType} is not a function`);
+              console.warn(
+                `Handler for JSON message type ${messageType} is not a function`,
+              );
             }
           }
         }
@@ -137,7 +147,9 @@ class WS {
             if (typeof eventHandler === "function") {
               await eventHandler(message, this);
             } else {
-              console.warn(`Handler for JSON event ${messageEvent} is not a function`);
+              console.warn(
+                `Handler for JSON event ${messageEvent} is not a function`,
+              );
             }
           }
         }
@@ -186,6 +198,9 @@ class WS {
   async send(data: ArrayBuffer | string) {
     if (this.conn && this.conn.readyState === WebSocket.OPEN) {
       this.conn.send(data);
+      if (typeof data === "string") {
+        console.debug(`Sent message: \n`, JSON.parse(data));
+      }
     } else {
       console.warn(`Websocket is not connected. Cannot send message.`);
     }

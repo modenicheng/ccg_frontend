@@ -11,14 +11,14 @@ const pendingPings = new Map<
 
 export const heartbeatHandler = async (data: ArrayBuffer, ws: WS) => {
   const frame = HeartbeatFrame.load(data);
-  console.debug(`Received heartbeat frame: \n`, frame);
+  // console.debug(`Received heartbeat frame: \n`, frame);
 
   if (frame.heartbeat_type === HeartbeatType.PING) {
     // 情况1：收到服务器PING，回复PONG
     const pongFrame = new HeartbeatFrame(HeartbeatType.PONG, frame.uid);
     const pongData = pongFrame.dump();
     await ws.send(pongData);
-    console.debug(`Sent heartbeat pong frame: \n`, pongFrame);
+    // console.debug(`Sent heartbeat pong frame: \n`, pongFrame);
   } else if (frame.heartbeat_type === HeartbeatType.PONG) {
     // 情况2：收到服务器PONG，计算RTT、时钟偏移和精确延迟
     const pendingInfo = pendingPings.get(frame.uid);
@@ -30,9 +30,9 @@ export const heartbeatHandler = async (data: ArrayBuffer, ws: WS) => {
       const rtt = t4 - effectiveT1;
       pendingPings.delete(frame.uid);
 
-      console.debug(
-        `Calculated RTT: ${rtt}ms (effectiveT1=${effectiveT1}, t4=${t4}, frame.t1=${frame.t1})`,
-      );
+      // console.debug(
+      //   `Calculated RTT: ${rtt}ms (effectiveT1=${effectiveT1}, t4=${t4}, frame.t1=${frame.t1})`,
+      // );
 
       // 设置t4并计算时间偏移和精确延迟
       frame.t4 = t4;
@@ -47,15 +47,15 @@ export const heartbeatHandler = async (data: ArrayBuffer, ws: WS) => {
         if (calculatedLatency > 0) {
           latency = calculatedLatency;
         }
-        console.debug(
-          `Precise: clock offset=${clockOffset}ms, latency=${latency}ms, t2=${frame.t2}, t3=${frame.t3}`,
-        );
+        // console.debug(
+        //   `Precise: clock offset=${clockOffset}ms, latency=${latency}ms, t2=${frame.t2}, t3=${frame.t3}`,
+        // );
       } else {
         // 服务器没有提供t2/t3，使用简单RTT的一半作为单向延迟估计
         latency = rtt / 2;
-        console.debug(
-          `Estimated: using RTT/2 as latency=${latency}ms (no t2/t3 from server)`,
-        );
+        // console.debug(
+        //   `Estimated: using RTT/2 as latency=${latency}ms (no t2/t3 from server)`,
+        // );
       }
 
       // 更新全局状态
@@ -112,7 +112,7 @@ export const startHeartbeat = (
         );
         pendingPings.delete(pingFrame.uid);
       });
-      console.debug(`Sent client heartbeat ping frame: \n`, pingFrame);
+      // console.debug(`Sent client heartbeat ping frame: \n`, pingFrame);
       return true;
     }
     return false;

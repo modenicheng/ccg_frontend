@@ -17,6 +17,8 @@ import type {
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  YourTurnMessage,
+  AnswerBroadcastMessage,
   RoundStartMessage,
   PreloadAudioMessage,
 } from "../types/wsMessages";
@@ -80,6 +82,9 @@ function SpectatorPage() {
     platformUrl?: string;
   } | null>(null);
   const [isJudging, setIsJudging] = useState<boolean>(false);
+  const [currentAnsweringPlayer, setCurrentAnsweringPlayer] = useState<
+    number | null
+  >(null);
 
   // 玩家作答情况状态
   const [playerAnswers, setPlayerAnswers] = useState<
@@ -161,6 +166,14 @@ function SpectatorPage() {
     },
     [getCalibratedNow],
   );
+
+  const resetRoundTransientState = useCallback(() => {
+    setAnswerOrderByUserId({});
+    setCurrentAnsweringPlayer(null);
+    setPlayerAnswers([]);
+    setIsJudging(false);
+    setCurrentSong(null);
+  }, []);
 
   useEffect(() => {
     currentAudioUrlRef.current = currentAudioUrl;
@@ -312,6 +325,7 @@ function SpectatorPage() {
       GameEventId.PLAY,
       async (message) => {
         setAnswerOrderByUserId({});
+        setCurrentAnsweringPlayer(null);
         applyRemoteProgress(message, true);
         await audioRef.current?.resume();
         setIsJudging(false);
@@ -319,6 +333,14 @@ function SpectatorPage() {
         setCurrentSong(null);
       },
     );
+
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.SKIP_ROUND;
+      ts: number;
+      data: Record<string, never>;
+    }>(GameEventId.SKIP_ROUND, () => {
+      resetRoundTransientState();
+    });
 
     wsRef.current.onJsonEvent<AttemptAnswerMessage>(
       GameEventId.ATTEMPT_ANSWER,
@@ -336,6 +358,80 @@ function SpectatorPage() {
             ...prev,
             [attemptedUserId]: nextOrder,
           };
+        });
+      },
+    );
+
+    wsRef.current.onJsonEvent<YourTurnMessage>(GameEventId.YOUR_TURN, (message) => {
+      const turnUserId = message?.data?.user_id;
+      if (typeof turnUserId === "number") {
+        setCurrentAnsweringPlayer(turnUserId);
+      }
+    });
+
+    wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
+      GameEventId.ANSWER_BROADCAST,
+      (message) => {
+        const rawPlayerId = message?.data?.player_id;
+        const selectedTagIds = message?.data?.selected_tag_ids ?? [];
+        const descriptionText = message?.data?.description_text ?? "";
+        const playerIdNum = Number.parseInt(rawPlayerId, 10);
+
+        if (!Number.isFinite(playerIdNum)) {
+          return;
+        }
+
+        const latestRoomState = gameStore.getState().roomState;
+        const latestTagGroups = latestRoomState?.tag_groups ?? [];
+        const latestPlayers = latestRoomState?.players ?? [];
+        const selectedAnswerMap: Record<number, number | null> = {};
+
+        selectedTagIds.forEach((tagId) => {
+          const matchedGroup = latestTagGroups.find((group) =>
+            group.tags.some((tag) => tag.id === tagId),
+          );
+          if (matchedGroup) {
+            selectedAnswerMap[matchedGroup.id] = tagId;
+          }
+        });
+
+        const orderFromQueue =
+          latestRoomState?.answer_queue?.find((item) => item.player_id === playerIdNum)
+            ?.order ?? null;
+
+        const playerName =
+          latestPlayers.find((player) => player.id === playerIdNum)?.username ??
+          `玩家${playerIdNum}`;
+
+        setPlayerAnswers((prev) => {
+          const existing = prev.find((item) => item.playerId === playerIdNum);
+          const fallbackOrder = existing?.order ?? prev.length + 1;
+          const nextOrder = orderFromQueue ?? fallbackOrder;
+
+          if (existing) {
+            return prev.map((item) =>
+              item.playerId === playerIdNum
+                ? {
+                    ...item,
+                    username: playerName,
+                    answers: selectedAnswerMap,
+                    description: descriptionText,
+                    order: nextOrder,
+                  }
+                : item,
+            );
+          }
+
+          return [
+            ...prev,
+            {
+              playerId: playerIdNum,
+              username: playerName,
+              answers: selectedAnswerMap,
+              description: descriptionText,
+              order: nextOrder,
+            },
+          ];
         });
       },
     );
@@ -520,25 +616,17 @@ function SpectatorPage() {
         }
 
         // 2. 设置起始播放位置
-        if (roundData.start_pertent > 0 && audioRef.current) {
+        if (roundData.start_percent > 0 && audioRef.current) {
           const duration = audioRef.current.durationMs;
           if (duration > 0) {
-            const startMs = duration * roundData.start_pertent;
+            const startMs = duration * roundData.start_percent;
             audioRef.current.progressMs = startMs;
           }
         } else if (audioRef.current) {
           audioRef.current.progressMs = 0;
         }
 
-        // 3. 清除抢答队列状态
-        setAnswerOrderByUserId({});
-
-        // 4. 清空玩家作答情况
-        setPlayerAnswers([]);
-
-        // 5. 隐藏判分界面和曲目信息
-        setIsJudging(false);
-        setCurrentSong(null);
+        resetRoundTransientState();
 
         console.log(`Round ${roundData.round_index} started`, roundData);
       },
@@ -577,6 +665,7 @@ function SpectatorPage() {
   }, [
     applyRemoteProgress,
     roomId,
+    resetRoundTransientState,
     setConnected,
     setRoomId,
     setUrl,
@@ -781,6 +870,7 @@ function SpectatorPage() {
                           username={player.username}
                           order={order}
                           activate={typeof order === "number"}
+                          answering={currentAnsweringPlayer === player.id}
                           isSelf={false}
                         />
                       </div>

@@ -18,6 +18,8 @@ import type {
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  YourTurnMessage,
+  AnswerBroadcastMessage,
   RoundStartMessage,
   StartPosUpdateMessage,
   GameOverMessage,
@@ -58,16 +60,17 @@ const logAudioTrigger = (
 
 const buildWsUrl = (roomId: string, token: string | null) => {
   const encodedRoomId = encodeURIComponent(roomId);
-  const baseOrigin = development
-    ? ((import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
-      "http://localhost:8000")
-    : window.location.origin;
+  // const baseOrigin = development
+  //   ? ((import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
+  //     "http://localhost:8000")
+  //   : window.location.origin;
 
-  const url = new URL(baseOrigin);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = `/ws/${encodedRoomId}`;
-  url.search = token ? `token=${encodeURIComponent(token)}` : "";
-  return url.toString();
+  // const url = new URL(baseOrigin);
+  // url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const pathname = `/ws/${encodedRoomId}`;
+  // url.search = token ? `token=${encodeURIComponent(token)}` : "";
+  // return url.toString();
+  return pathname + (token ? `?token=${encodeURIComponent(token)}` : "");
 };
 
 const readCookie = (name: string): string | null => {
@@ -350,11 +353,16 @@ function RoomPage() {
     addAttemptOrder(userId);
 
     const calibratedNow = Math.round(getCalibratedNow());
+    const currentProgressMs = Math.max(
+      0,
+      Math.round(audioRef.current?.currentTimeMs ?? 0),
+    );
     const payload: AttemptAnswerMessage = {
       event: GameEventId.ATTEMPT_ANSWER,
       ts: calibratedNow,
       data: {
         offset_ts: calibratedNow,
+        progress_ms: currentProgressMs,
         user_id: userId,
       },
     };
@@ -376,9 +384,8 @@ function RoomPage() {
       event: GameEventId.SUBMIT_ANSWER,
       ts: Math.round(getCalibratedNow()),
       data: {
-        user_id: userId,
-        tag_ids: selectedTagIds,
-        description: description,
+        selected_tag_ids: selectedTagIds,
+        description_text: description,
       },
     };
 
@@ -547,6 +554,34 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
     skipConfirmDialogRef.current?.close();
   }, [getCalibratedNow, isOwner]);
+
+  const resetRoundTransientState = useCallback(() => {
+    setAnswerOrderByUserId({});
+    setPlayerAnswers([]);
+    setCurrentAnsweringPlayer(null);
+    setIsAnswerModalOpen(false);
+    setIsAnswerModalMinimized(false);
+    setDescription("");
+    setSelectedDescriptions([]);
+    setHistoryTagIds([]);
+    setReferenceDescriptions([]);
+    setPlayerDescriptions([]);
+    setCurrentSong(null);
+    setIsJudging(false);
+
+    setSelectedTags({});
+    setSelectedTagByGroup((prev) => {
+      const next: Record<number, number | null> = {};
+      Object.keys(prev).forEach((key) => {
+        next[Number(key)] = null;
+      });
+      return next;
+    });
+
+    judgingDialogRef.current?.close();
+    confirmAnswerDialogRef.current?.close();
+    answerModalRef.current?.close();
+  }, []);
 
   const handleSelectJudgingTag = (groupId: number, tagId: number) => {
     setSelectedTags((prev) => ({
@@ -820,6 +855,7 @@ function RoomPage() {
       GameEventId.PLAY,
       async (message) => {
         setAnswerOrderByUserId({});
+        setCurrentAnsweringPlayer(null);
         applyRemoteProgress(message, true);
         await audioRef.current?.resume();
         setIsJudging(false);
@@ -839,14 +875,8 @@ function RoomPage() {
       },
     );
 
-    // 处理用户答题轮次事件
-    wsRef.current.onJsonEvent<{
-      event: typeof GameEventId.YOUR_TURN;
-      ts: number;
-      data: {
-        user_id: number;
-      };
-    }>(GameEventId.YOUR_TURN, (message) => {
+    // 处理用户答题轮次事件（全房间广播）
+    wsRef.current.onJsonEvent<YourTurnMessage>(GameEventId.YOUR_TURN, (message) => {
       const turnUserId = message?.data?.user_id;
       if (typeof turnUserId === "number") {
         setCurrentAnsweringPlayer(turnUserId);
@@ -855,6 +885,82 @@ function RoomPage() {
           setIsAnswerModalMinimized(false);
         }
       }
+    });
+
+    // 处理玩家答案广播，实时展示在“玩家作答情况”表中
+    wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
+      GameEventId.ANSWER_BROADCAST,
+      (message) => {
+        const rawPlayerId = message?.data?.player_id;
+        const selectedTagIds = message?.data?.selected_tag_ids ?? [];
+        const descriptionText = message?.data?.description_text ?? "";
+        const playerIdNum = Number.parseInt(rawPlayerId, 10);
+
+        if (!Number.isFinite(playerIdNum)) {
+          return;
+        }
+
+        const latestRoomState = gameStore.getState().roomState;
+        const latestTagGroups = latestRoomState?.tag_groups ?? [];
+        const latestPlayers = latestRoomState?.players ?? [];
+        const selectedAnswerMap: Record<number, number | null> = {};
+
+        selectedTagIds.forEach((tagId) => {
+          const matchedGroup = latestTagGroups.find((group) =>
+            group.tags.some((tag) => tag.id === tagId),
+          );
+          if (matchedGroup) {
+            selectedAnswerMap[matchedGroup.id] = tagId;
+          }
+        });
+
+        const orderFromQueue =
+          latestRoomState?.answer_queue?.find((item) => item.player_id === playerIdNum)
+            ?.order ?? null;
+
+        const playerName =
+          latestPlayers.find((player) => player.id === playerIdNum)?.username ??
+          `玩家${playerIdNum}`;
+
+        setPlayerAnswers((prev) => {
+          const existing = prev.find((item) => item.playerId === playerIdNum);
+          const fallbackOrder = existing?.order ?? prev.length + 1;
+          const nextOrder = orderFromQueue ?? fallbackOrder;
+
+          if (existing) {
+            return prev.map((item) =>
+              item.playerId === playerIdNum
+                ? {
+                    ...item,
+                    username: playerName,
+                    answers: selectedAnswerMap,
+                    description: descriptionText,
+                    order: nextOrder,
+                  }
+                : item,
+            );
+          }
+
+          return [
+            ...prev,
+            {
+              playerId: playerIdNum,
+              username: playerName,
+              answers: selectedAnswerMap,
+              description: descriptionText,
+              order: nextOrder,
+            },
+          ];
+        });
+      },
+    );
+
+    wsRef.current.onJsonEvent<{
+      event: typeof GameEventId.SKIP_ROUND;
+      ts: number;
+      data: Record<string, never>;
+    }>(GameEventId.SKIP_ROUND, () => {
+      resetRoundTransientState();
     });
 
     wsRef.current.onJsonEvent<{
@@ -1123,10 +1229,10 @@ function RoomPage() {
         }
 
         // 2. 设置起始播放位置
-        if (roundData.start_pertent > 0 && audioRef.current) {
+        if (roundData.start_percent > 0 && audioRef.current) {
           const duration = audioRef.current.durationMs;
           if (duration > 0) {
-            const startMs = duration * roundData.start_pertent;
+            const startMs = duration * roundData.start_percent;
             audioRef.current.progressMs = startMs;
           }
         } else if (audioRef.current) {
@@ -1310,6 +1416,7 @@ function RoomPage() {
     addAttemptOrder,
     applyRemoteProgress,
     roomId,
+    resetRoundTransientState,
     setConnected,
     setRoomId,
     setUrl,
