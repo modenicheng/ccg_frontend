@@ -14,12 +14,15 @@ import { UserBar, SongInfoCard } from "../components";
 import type {
   WsTagGroup,
   WsPlayer,
+  AnswerQueueItem,
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  AnswerQueueMessage,
   YourTurnMessage,
   AnswerBroadcastMessage,
   RoundStartMessage,
+  ClearAnswerQueueMessage,
   PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
@@ -175,6 +178,27 @@ function SpectatorPage() {
     setCurrentSong(null);
   }, []);
 
+  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+    setAnswerOrderByUserId(
+      queue.reduce<Record<number, number>>((acc, item, index) => {
+        const order = item.order ?? index + 1;
+        acc[item.player_id] = order;
+        return acc;
+      }, {}),
+    );
+
+    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    setCurrentAnsweringPlayer(answeringPlayer);
+
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        answer_queue: queue,
+      });
+    }
+  }, []);
+
   useEffect(() => {
     currentAudioUrlRef.current = currentAudioUrl;
   }, [currentAudioUrl]);
@@ -303,14 +327,7 @@ function SpectatorPage() {
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
         setOnlinePlayers(payload.players.filter((player) => player.online));
-        setAnswerOrderByUserId(
-          payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
-            const order =
-              item.order ?? acc[item.player_id] ?? Object.keys(acc).length + 1;
-            acc[item.player_id] = order;
-            return acc;
-          }, {}),
-        );
+        syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
       },
@@ -340,6 +357,7 @@ function SpectatorPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
+      syncAnswerQueueState([]);
     });
 
     wsRef.current.onJsonEvent<AttemptAnswerMessage>(
@@ -367,6 +385,17 @@ function SpectatorPage() {
       if (typeof turnUserId === "number") {
         setCurrentAnsweringPlayer(turnUserId);
       }
+    });
+
+    wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
+      GameEventId.CLEAR_ANSWER_QUEUE,
+      () => {
+        syncAnswerQueueState([]);
+      },
+    );
+
+    wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
+      syncAnswerQueueState(message.data?.queue ?? []);
     });
 
     wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
@@ -707,6 +736,7 @@ function SpectatorPage() {
     setRoomId,
     setUrl,
     setWsClient,
+    syncAnswerQueueState,
   ]);
 
   useEffect(() => {

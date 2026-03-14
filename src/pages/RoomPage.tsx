@@ -7,6 +7,7 @@ import { WS } from "../wsClient";
 import { EventType, GameEventId } from "../types/eventTypes";
 import { heartbeatHandler, startHeartbeat } from "../wsClient/handlers";
 import useWebSocketStore from "../stores/webSocketStore";
+import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
@@ -15,9 +16,11 @@ import { UserBar, TagGroupSelector, SongInfoCard } from "../components";
 import type {
   WsTagGroup,
   WsPlayer,
+  AnswerQueueItem,
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  AnswerQueueMessage,
   YourTurnMessage,
   AnswerBroadcastMessage,
   RoundStartMessage,
@@ -141,6 +144,7 @@ function RoomPage() {
     getRoomUser,
   } = usePersistStore();
   const user = getRoomUser(roomId);
+  const pushToast = useErrorToastStore((state) => state.pushToast);
   const fallbackUserIdFromSession = Number.parseInt(
     sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "",
     10,
@@ -256,7 +260,6 @@ function RoomPage() {
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
-  const [audioLoadError, setAudioLoadError] = useState<string | null>(null);
   const [isVolumeToastVisible, setIsVolumeToastVisible] =
     useState<boolean>(false);
   const [isVolumeToastClosing, setIsVolumeToastClosing] =
@@ -271,22 +274,29 @@ function RoomPage() {
   const isWsDisconnected = !isConnected;
 
   const notifyAudioLoadError = useCallback((message: string) => {
-    setAudioLoadError(message);
-  }, []);
+    pushToast({ message, variant: "error" });
+  }, [pushToast]);
 
-  useEffect(() => {
-    if (!audioLoadError) {
-      return;
+  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+    setAnswerOrderByUserId(
+      queue.reduce<Record<number, number>>((acc, item, index) => {
+        const order = item.order ?? index + 1;
+        acc[item.player_id] = order;
+        return acc;
+      }, {}),
+    );
+
+    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    setCurrentAnsweringPlayer(answeringPlayer);
+
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        answer_queue: queue,
+      });
     }
-
-    const timer = window.setTimeout(() => {
-      setAudioLoadError(null);
-    }, 10000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [audioLoadError]);
+  }, []);
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -351,6 +361,11 @@ function RoomPage() {
     }
 
     addAttemptOrder(userId);
+
+    // 乐观控制：本地先暂停，后续再以服务端 PAUSE 事件为准进行校准
+    if (audioRef.current?.state === "running") {
+      void audioRef.current.pause();
+    }
 
     const calibratedNow = Math.round(getCalibratedNow());
     const currentProgressMs = Math.max(
@@ -824,14 +839,7 @@ function RoomPage() {
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
         setOnlinePlayers(payload.players.filter((player) => player.online));
-        setAnswerOrderByUserId(
-          payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
-            const order =
-              item.order ?? acc[item.player_id] ?? Object.keys(acc).length + 1;
-            acc[item.player_id] = order;
-            return acc;
-          }, {}),
-        );
+        syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
         setSelectedTagByGroup(
@@ -961,6 +969,7 @@ function RoomPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
+      syncAnswerQueueState([]);
     });
 
     wsRef.current.onJsonEvent<{
@@ -1373,27 +1382,16 @@ function RoomPage() {
     wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
       GameEventId.CLEAR_ANSWER_QUEUE,
       () => {
-        setAnswerOrderByUserId({});
+        syncAnswerQueueState([]);
         console.log("Answer queue cleared");
       },
     );
 
     // 处理抢答队列更新事件
-    wsRef.current.onJsonEvent<{
-      event: typeof GameEventId.ANSWER_QUEUE;
-      ts: number;
-      data: {
-        queue: Array<{ player_id: number; order: number }>;
-      };
-    }>(GameEventId.ANSWER_QUEUE, (message) => {
-      if (message.data?.queue) {
-        const orderMap: Record<number, number> = {};
-        message.data.queue.forEach((item) => {
-          orderMap[item.player_id] = item.order;
-        });
-        setAnswerOrderByUserId(orderMap);
-        console.log("Answer queue updated:", orderMap);
-      }
+    wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
+      const queue = message.data?.queue ?? [];
+      syncAnswerQueueState(queue);
+      console.log("Answer queue updated:", queue);
     });
 
     // 处理音频预加载事件
@@ -1458,6 +1456,7 @@ function RoomPage() {
     setRoomId,
     setUrl,
     setWsClient,
+    syncAnswerQueueState,
     switchAudioSourceIfNeeded,
     notifyAudioLoadError,
   ]);
@@ -2237,14 +2236,6 @@ function RoomPage() {
           </div>
         </div>
       </div>
-
-      {audioLoadError ? (
-        <div className="toast toast-top toast-center z-50">
-          <div role="alert" className="alert alert-soft alert-error">
-            <span>{audioLoadError}</span>
-          </div>
-        </div>
-      ) : null}
 
       {isVolumeToastVisible ? (
         <div className="toast toast-top toast-start z-50">

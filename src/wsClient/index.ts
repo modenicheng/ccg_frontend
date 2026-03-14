@@ -1,4 +1,48 @@
 import { EventType, type GameEventId } from "../types/eventTypes";
+import useErrorToastStore from "../stores/errorToastStore";
+
+interface WSErrorMessageData {
+  message?: unknown;
+  error_event?: unknown;
+}
+
+interface WSErrorPayload {
+  event?: unknown;
+  message?: unknown;
+  error_event?: unknown;
+  data?: WSErrorMessageData;
+}
+
+const extractWsErrorPayload = (
+  message: unknown,
+): { message: string; errorEvent: number | null } | null => {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+
+  const payload = message as WSErrorPayload;
+  if (payload.event !== EventType.MESSAGE) {
+    return null;
+  }
+
+  const dataMessage = payload.data?.message;
+  const topLevelMessage = payload.message;
+  const normalizedMessage =
+    typeof dataMessage === "string"
+      ? dataMessage
+      : typeof topLevelMessage === "string"
+        ? topLevelMessage
+        : "发生未知错误";
+
+  const rawErrorEvent = payload.data?.error_event ?? payload.error_event;
+  const normalizedErrorEvent =
+    typeof rawErrorEvent === "number" ? rawErrorEvent : null;
+
+  return {
+    message: normalizedMessage,
+    errorEvent: normalizedErrorEvent,
+  };
+};
 
 interface retryConfig {
   max: number;
@@ -118,6 +162,11 @@ class WS {
           return;
         }
         console.debug(`Received text message: \n`, message);
+
+        const errorPayload = extractWsErrorPayload(message);
+        if (errorPayload) {
+          useErrorToastStore.getState().pushWsError(errorPayload);
+        }
 
         const messageType =
           message && typeof message === "object"

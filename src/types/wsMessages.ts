@@ -126,6 +126,16 @@ export interface YourTurnMessage {
   data: YourTurnMessageData;
 }
 
+export interface AnswerQueueMessageData {
+  queue: AnswerQueueItem[];
+}
+
+export interface AnswerQueueMessage {
+  event: typeof GameEventId.ANSWER_QUEUE;
+  ts: number;
+  data: AnswerQueueMessageData;
+}
+
 export interface AnswerBroadcastMessageData {
   player_id: string;
   selected_tag_ids: number[];
@@ -285,6 +295,7 @@ export type WsMessage =
   | PlayControlMessage
   | RoundStartMessage
   | AttemptAnswerMessage
+  | AnswerQueueMessage
   | YourTurnMessage
   | AnswerBroadcastMessage
   | JudgingMessage
