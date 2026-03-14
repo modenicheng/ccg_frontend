@@ -5,6 +5,7 @@ type UserBarProps = {
   activate?: boolean;
   answering?: boolean;
   isSelf?: boolean;
+  online?: boolean;
 };
 
 export const UserBar: React.FC<UserBarProps> = ({
@@ -13,6 +14,7 @@ export const UserBar: React.FC<UserBarProps> = ({
   activate = false,
   answering = false,
   isSelf = false,
+  online = true,
 }) => {
   return (
     <>
@@ -21,11 +23,12 @@ export const UserBar: React.FC<UserBarProps> = ({
           "bg-primary": answering,
           "shadow-sm": activate,
           "bg-primary/10": activate && !answering,
-          "buzz-activate-pop": activate,
+          "buzz-ordered-item": typeof order === "number",
+          "opacity-60": !online,
         })}
       >
         <div className="card-body p-2 w-full overflow-hidden">
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <div
               className={clsx(
                 "badge badge-primary transition-all w-16",
@@ -46,11 +49,20 @@ export const UserBar: React.FC<UserBarProps> = ({
                 "text-primary-content": answering,
                 "text-primary translate-x-0": activate,
                 "-translate-x-10": !activate,
+                "text-gray-400": !online,
               })}
             >
               {username}
             </div>
             {isSelf ? <div className="badge badge-soft badge-info ml-auto">我</div> : null}
+            {!online && (
+              <div
+                className="badge badge-error badge-xs ml-auto"
+                title="玩家已断线"
+              >
+                ●
+              </div>
+            )}
           </div>
         </div>
       </div>

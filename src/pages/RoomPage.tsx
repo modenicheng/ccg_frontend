@@ -823,7 +823,8 @@ function RoomPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        setOnlinePlayers(payload.players.filter((player) => player.online));
+        // 显示所有玩家（包括离线的），后端会在对局开始后保留玩家但标记为离线
+        setOnlinePlayers(payload.players);
         setAnswerOrderByUserId(
           payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
             const order =
@@ -1092,11 +1093,12 @@ function RoomPage() {
     }>(GameEventId.ROOM_JOIN, (message) => {
       const newPlayer = message.data;
       if (newPlayer) {
+        // 使用函数式更新确保原子性，避免多个事件快速到达时的竞态条件
         setOnlinePlayers((prev) => {
           // 检查玩家是否已存在
           const playerExists = prev.some((p) => p.id === newPlayer.id);
           if (playerExists) {
-            // 更新现有玩家信息
+            // 更新现有玩家信息（可能是断线重连）
             return prev.map((p) => (p.id === newPlayer.id ? newPlayer : p));
           } else {
             // 添加新玩家
@@ -1111,7 +1113,7 @@ function RoomPage() {
       }
     });
 
-    // 处理玩家离开事件
+    // 处理玩家离开事件（对局开始后仅标记为离线，对局未开始才移除）
     wsRef.current.onJsonEvent<{
       event: typeof GameEventId.PLAYER_LEAVE;
       ts: number;
@@ -1127,11 +1129,25 @@ function RoomPage() {
         return;
       }
 
-      setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
-      setAnswerOrderByUserId((prev) => {
-        if (!(leftPlayer.id in prev)) {
-          return prev;
+      // 检查当前回合状态，判断是否应该完全移除玩家
+      const currentRoundState = gameStore.getState().roomState?.roundState;
+      const isGameStarted = currentRoundState && currentRoundState !== "PENDING";
+
+      setOnlinePlayers((prev) => {
+        if (isGameStarted) {
+          // 对局已开始：保留玩家但标记为离线
+          return prev.map((p) =>
+            p.id === leftPlayer.id ? { ...p, online: false } : p
+          );
+        } else {
+          // 对局未开始：完全移除玩家
+          return prev.filter((p) => p.id !== leftPlayer.id);
         }
+      });
+
+      // 抢答队列始终移除该玩家
+      setAnswerOrderByUserId((prev) => {
+        if (!(leftPlayer.id in prev)) return prev;
         const next = { ...prev };
         delete next[leftPlayer.id];
         return next;
@@ -2103,6 +2119,7 @@ function RoomPage() {
                           activate={typeof order === "number"}
                           answering={currentAnsweringPlayer === player.id}
                           isSelf={isCurrentUser}
+                          online={player.online}
                         />
                         {isOwner && !isCurrentUser && (
                           <button
