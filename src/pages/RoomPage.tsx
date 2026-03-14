@@ -38,7 +38,7 @@ import {
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
-const AUDIO_SYNC_THRESHOLD_MS = 40;
+const AUDIO_SYNC_THRESHOLD_MS = 20;
 const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
 const CANVAS_INIT_DELAY_MS = 0;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
@@ -631,14 +631,20 @@ function RoomPage() {
         return;
       }
 
-      const now = getCalibratedNow();
-      // offset_ts可能为null，如果为null则使用消息的时间戳
-      const offsetTs =
-        typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
-          ? controlData.offset_ts
-          : message.ts;
-      const elapsed = Math.max(0, now - offsetTs);
-      const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      const isPauseEvent = message.event === GameEventId.PAUSE;
+      let expectedMs = Math.max(0, controlData.progress_ms);
+
+      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示“冻结时刻”，不应继续累加 elapsed
+      if (!isPauseEvent) {
+        const now = getCalibratedNow();
+        const offsetTs =
+          typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
+            ? controlData.offset_ts
+            : message.ts;
+        const elapsed = Math.max(0, now - offsetTs);
+        expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      }
+
       const localMs = audioRef.current.currentTimeMs;
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
@@ -791,7 +797,10 @@ function RoomPage() {
 
             // 创建伪PlayControlMessage用于applyRemoteProgress
             const pseudoMessage = {
-              event: GameEventId.PLAY, // 事件类型不影响applyRemoteProgress逻辑
+              event:
+                playbackStatus.play_state === "paused"
+                  ? GameEventId.PAUSE
+                  : GameEventId.PLAY,
               ts: playbackStatus.updated_at,
               data: {
                 progress_ms: playbackStatus.progress_ms,
