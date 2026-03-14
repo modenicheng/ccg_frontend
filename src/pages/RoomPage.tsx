@@ -1104,6 +1104,33 @@ function RoomPage() {
           }
         });
 
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          const existingIndex = currentRoomState.players.findIndex(
+            (player) => player.id === newPlayer.id,
+          );
+
+          let nextPlayers: WsPlayer[];
+          if (existingIndex >= 0) {
+            nextPlayers = currentRoomState.players.map((player) =>
+              player.id === newPlayer.id
+                ? { ...player, ...newPlayer, online: true }
+                : player,
+            );
+          } else {
+            nextPlayers = [
+              ...currentRoomState.players,
+              { ...newPlayer, online: true },
+            ];
+          }
+
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            players: nextPlayers,
+            playersSimple: getPlayersSimple(nextPlayers),
+          });
+        }
+
         // 如果新玩家是房主，更新房主信息
         if (newPlayer.is_owner) {
           setRoomOwner(newPlayer.username);
@@ -1128,6 +1155,20 @@ function RoomPage() {
       }
 
       setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
+
+      const currentRoomState = gameStore.getState().roomState;
+      if (currentRoomState) {
+        const nextPlayers = currentRoomState.players.map((player) =>
+          player.id === leftPlayer.id ? { ...player, online: false } : player,
+        );
+
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          players: nextPlayers,
+          playersSimple: getPlayersSimple(nextPlayers),
+        });
+      }
+
       setAnswerOrderByUserId((prev) => {
         if (!(leftPlayer.id in prev)) {
           return prev;
@@ -1136,10 +1177,6 @@ function RoomPage() {
         delete next[leftPlayer.id];
         return next;
       });
-
-      if (leftPlayer.is_owner) {
-        setRoomOwner("-");
-      }
     });
 
     // 处理玩家准备事件
