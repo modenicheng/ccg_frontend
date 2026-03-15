@@ -45,6 +45,22 @@ import {
   type RoomSong,
 } from "../api/room_songs";
 import useErrorToastStore from "../stores/errorToastStore";
+import usePersistStore from "../stores/persistStore";
+
+const readCookie = (name: string): string | null => {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matched = document.cookie.match(
+    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
+  );
+  if (!matched) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(matched[1]);
+  } catch {
+    return matched[1];
+  }
+};
 
 function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
   const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
@@ -76,6 +92,23 @@ const RoomManagePage = () => {
   const { roomState } = useGameStore();
   const { wsClient } = useWebSocketStore();
   const pushToast = useErrorToastStore((state) => state.pushToast);
+  const persistedRoomUser = usePersistStore((state) =>
+    roomid ? state.getRoomUser(roomid) : undefined,
+  );
+
+  const roomId = roomid?.trim() ?? "";
+  const sessionUserId = Number.parseInt(
+    roomId ? sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "" : "",
+    10,
+  );
+  const cookieUserId = Number.parseInt(
+    roomId ? readCookie(`ccg-room-user-id:${roomId}`) ?? "" : "",
+    10,
+  );
+  const currentUserId =
+    persistedRoomUser?.id ??
+    (Number.isFinite(sessionUserId) ? sessionUserId : null) ??
+    (Number.isFinite(cookieUserId) ? cookieUserId : null);
 
   const [title, setTitle] = useState<string>("");
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -331,14 +364,39 @@ const RoomManagePage = () => {
         return;
       }
 
+      if (currentUserId === null) {
+        navigate("/", { replace: true });
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
       try {
-        const [roomInfo, allGroups] = await Promise.all([
-          getRoomInfo(roomid),
-          loadTagGroups(),
-        ]);
+        const roomInfo = (await getRoomInfo(roomid)) as RoomInfoResponse & {
+          playersDetailed?: Array<{
+            id: number;
+            username: string;
+            is_owner: boolean;
+          }>;
+        };
+
+        const currentPlayer = roomInfo.playersDetailed?.find(
+          (player) => player.id === currentUserId,
+        );
+        const hostPlayerId = Number.parseInt(roomInfo.hostPlayerId, 10);
+        const isCurrentUserOwner =
+          currentPlayer?.is_owner ??
+          (Number.isFinite(hostPlayerId) && currentUserId !== null
+            ? hostPlayerId === currentUserId
+            : false);
+
+        if (!isCurrentUserOwner) {
+          navigate(`/room/${roomid}`, { replace: true });
+          return;
+        }
+
+        const allGroups = await loadTagGroups();
         setRoomSongsPage(1);
         await loadRoomSongs(1);
 
@@ -375,7 +433,7 @@ const RoomManagePage = () => {
     return () => {
       isMounted = false;
     };
-  }, [loadRoomSongs, loadTagGroups, navigate, roomid]);
+  }, [currentUserId, loadRoomSongs, loadTagGroups, navigate, roomid]);
 
   useEffect(() => {
     if (!manageError && !manageSuccess) {
