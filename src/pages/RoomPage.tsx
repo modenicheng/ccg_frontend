@@ -2081,12 +2081,14 @@ function RoomPage() {
                   判分
                 </button>
               </div>
-              <div
+              <a
                 className="btn btn-sm  btn-soft"
-                onClick={() => navigate(`/room/${roomId}/manage`)}
+                href={`/room/${roomId}/manage`}
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 管理页面
-              </div>
+              </a>
             </div>
           </div>
         ) : null}
