@@ -7,6 +7,7 @@ import { WS } from "../wsClient";
 import { EventType, GameEventId } from "../types/eventTypes";
 import { heartbeatHandler, startHeartbeat } from "../wsClient/handlers";
 import useWebSocketStore from "../stores/webSocketStore";
+import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
@@ -15,15 +16,18 @@ import { UserBar, TagGroupSelector, SongInfoCard } from "../components";
 import type {
   WsTagGroup,
   WsPlayer,
+  AnswerQueueItem,
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  AnswerQueueMessage,
   YourTurnMessage,
   AnswerBroadcastMessage,
   RoundStartMessage,
   StartPosUpdateMessage,
   GameOverMessage,
   ClearAnswerQueueMessage,
+  KickUserMessage,
   PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
@@ -35,7 +39,7 @@ import {
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
-const AUDIO_SYNC_THRESHOLD_MS = 40;
+const AUDIO_SYNC_THRESHOLD_MS = 20;
 const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
 const CANVAS_INIT_DELAY_MS = 0;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
@@ -86,6 +90,24 @@ const readCookie = (name: string): string | null => {
   } catch {
     return matched[1];
   }
+};
+
+const clearCookie = (name: string) => {
+  document.cookie = `${name}=; path=/; Max-Age=0; SameSite=Lax`;
+};
+
+const clearRoomIdentityStorage = (roomId: string) => {
+  const tokenKey = `ccg-room-token:${roomId}`;
+  const userIdKey = `ccg-room-user-id:${roomId}`;
+  const usernameKey = `ccg-room-username:${roomId}`;
+
+  sessionStorage.removeItem(tokenKey);
+  sessionStorage.removeItem(userIdKey);
+  sessionStorage.removeItem(usernameKey);
+
+  clearCookie(tokenKey);
+  clearCookie(userIdKey);
+  clearCookie(usernameKey);
 };
 
 const parseErrorMessage = (error: unknown, fallback: string): string => {
@@ -139,8 +161,11 @@ function RoomPage() {
     volume: persistVolume,
     setVolume: setPersistVolume,
     getRoomUser,
+    addUser,
+    removeUser,
   } = usePersistStore();
   const user = getRoomUser(roomId);
+  const pushToast = useErrorToastStore((state) => state.pushToast);
   const fallbackUserIdFromSession = Number.parseInt(
     sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "",
     10,
@@ -149,6 +174,11 @@ function RoomPage() {
     readCookie(`ccg-room-user-id:${roomId}`) ?? "",
     10,
   );
+  const tokenFromSession =
+    sessionStorage.getItem(`ccg-room-token:${roomId}`)?.trim() || null;
+  const tokenFromCookie = readCookie(`ccg-room-token:${roomId}`)?.trim() || null;
+  const tokenFromPersist = user?.token?.trim() || null;
+  const wsAuthToken = tokenFromSession ?? tokenFromCookie ?? tokenFromPersist;
   const userId =
     user?.id ??
     (Number.isFinite(fallbackUserIdFromSession)
@@ -158,8 +188,6 @@ function RoomPage() {
       ? fallbackUserIdFromCookie
       : null);
 
-  // 简化身份鉴权：仅判定是否为房主
-  const isOwner = user?.isOwner || false;
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
   const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
@@ -220,6 +248,17 @@ function RoomPage() {
   const [isReady, setIsReady] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  // 房主判定：优先使用持久化身份，回退到房间实时玩家列表判定（避免本地状态缺失导致误判）
+  const isOwner = useMemo(() => {
+    if (user?.isOwner) {
+      return true;
+    }
+    if (userId === null || !roomState?.players?.length) {
+      return false;
+    }
+    return roomState.players.some((player) => player.id === userId && player.is_owner);
+  }, [roomState?.players, user?.isOwner, userId]);
+
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
       ...prev,
@@ -256,7 +295,6 @@ function RoomPage() {
   const progressBarRef = useRef<HTMLSpanElement | null>(null);
   const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
-  const [audioLoadError, setAudioLoadError] = useState<string | null>(null);
   const [isVolumeToastVisible, setIsVolumeToastVisible] =
     useState<boolean>(false);
   const [isVolumeToastClosing, setIsVolumeToastClosing] =
@@ -271,22 +309,29 @@ function RoomPage() {
   const isWsDisconnected = !isConnected;
 
   const notifyAudioLoadError = useCallback((message: string) => {
-    setAudioLoadError(message);
-  }, []);
+    pushToast({ message, variant: "error" });
+  }, [pushToast]);
 
-  useEffect(() => {
-    if (!audioLoadError) {
-      return;
+  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+    setAnswerOrderByUserId(
+      queue.reduce<Record<number, number>>((acc, item, index) => {
+        const order = item.order ?? index + 1;
+        acc[item.player_id] = order;
+        return acc;
+      }, {}),
+    );
+
+    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    setCurrentAnsweringPlayer(answeringPlayer);
+
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        answer_queue: queue,
+      });
     }
-
-    const timer = window.setTimeout(() => {
-      setAudioLoadError(null);
-    }, 10000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [audioLoadError]);
+  }, []);
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -316,6 +361,10 @@ function RoomPage() {
       }
       if (bHasOrder) {
         return 1;
+      }
+      // 没有答题顺序时在线优先
+      if (a.online !== b.online) {
+        return a.online ? -1 : 1;
       }
       return a.id - b.id;
     });
@@ -351,6 +400,11 @@ function RoomPage() {
     }
 
     addAttemptOrder(userId);
+
+    // 乐观控制：本地先暂停，后续再以服务端 PAUSE 事件为准进行校准
+    if (audioRef.current?.state === "running") {
+      void audioRef.current.pause();
+    }
 
     const calibratedNow = Math.round(getCalibratedNow());
     const currentProgressMs = Math.max(
@@ -616,14 +670,20 @@ function RoomPage() {
         return;
       }
 
-      const now = getCalibratedNow();
-      // offset_ts可能为null，如果为null则使用消息的时间戳
-      const offsetTs =
-        typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
-          ? controlData.offset_ts
-          : message.ts;
-      const elapsed = Math.max(0, now - offsetTs);
-      const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      const isPauseEvent = message.event === GameEventId.PAUSE;
+      let expectedMs = Math.max(0, controlData.progress_ms);
+
+      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示“冻结时刻”，不应继续累加 elapsed
+      if (!isPauseEvent) {
+        const now = getCalibratedNow();
+        const offsetTs =
+          typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
+            ? controlData.offset_ts
+            : message.ts;
+        const elapsed = Math.max(0, now - offsetTs);
+        expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      }
+
       const localMs = audioRef.current.currentTimeMs;
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
@@ -689,14 +749,17 @@ function RoomPage() {
   }, [sendPlaybackControl]);
 
   useEffect(() => {
-    if (!roomId) {
+    if (!roomId || !wsAuthToken) {
       return;
     }
 
     let isDisposed = false;
 
-    const token = sessionStorage.getItem(`ccg-room-token:${roomId}`);
-    const wsUrl = buildWsUrl(roomId, token);
+    if (tokenFromSession !== wsAuthToken) {
+      sessionStorage.setItem(`ccg-room-token:${roomId}`, wsAuthToken);
+    }
+
+    const wsUrl = buildWsUrl(roomId, wsAuthToken);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);
@@ -709,6 +772,31 @@ function RoomPage() {
           return;
         }
         const payload = message.data;
+
+        // 使用 ROOM_STATE 作为权威来源，自动纠正本地持久化身份（尤其是 isOwner）
+        const currentUserId = userIdRef.current;
+        if (typeof currentUserId === "number" && wsAuthToken) {
+          const selfPlayer = payload.players.find((player) => player.id === currentUserId);
+          if (selfPlayer) {
+            const persistedUser = usePersistStore.getState().getRoomUser(payload.room_id);
+            const shouldUpdatePersistUser =
+              !persistedUser ||
+              persistedUser.id !== selfPlayer.id ||
+              persistedUser.username !== selfPlayer.username ||
+              persistedUser.token !== wsAuthToken ||
+              persistedUser.isOwner !== selfPlayer.is_owner;
+
+            if (shouldUpdatePersistUser) {
+              addUser({
+                id: selfPlayer.id,
+                roomId: payload.room_id,
+                username: selfPlayer.username,
+                token: wsAuthToken,
+                isOwner: selfPlayer.is_owner,
+              });
+            }
+          }
+        }
 
         // 从玩家列表中获取房主
         const ownerPlayer = payload.players.find((p) => p.is_owner);
@@ -776,7 +864,10 @@ function RoomPage() {
 
             // 创建伪PlayControlMessage用于applyRemoteProgress
             const pseudoMessage = {
-              event: GameEventId.PLAY, // 事件类型不影响applyRemoteProgress逻辑
+              event:
+                playbackStatus.play_state === "paused"
+                  ? GameEventId.PAUSE
+                  : GameEventId.PLAY,
               ts: playbackStatus.updated_at,
               data: {
                 progress_ms: playbackStatus.progress_ms,
@@ -833,6 +924,9 @@ function RoomPage() {
             return acc;
           }, {}),
         );
+        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
+        setOnlinePlayers(payload.players);
+        syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
         setSelectedTagByGroup(
@@ -962,6 +1056,7 @@ function RoomPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
+      syncAnswerQueueState([]);
     });
 
     wsRef.current.onJsonEvent<{
@@ -1106,6 +1201,33 @@ function RoomPage() {
           }
         });
 
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          const existingIndex = currentRoomState.players.findIndex(
+            (player) => player.id === newPlayer.id,
+          );
+
+          let nextPlayers: WsPlayer[];
+          if (existingIndex >= 0) {
+            nextPlayers = currentRoomState.players.map((player) =>
+              player.id === newPlayer.id
+                ? { ...player, ...newPlayer, online: true }
+                : player,
+            );
+          } else {
+            nextPlayers = [
+              ...currentRoomState.players,
+              { ...newPlayer, online: true },
+            ];
+          }
+
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            players: nextPlayers,
+            playersSimple: getPlayersSimple(nextPlayers),
+          });
+        }
+
         // 如果新玩家是房主，更新房主信息
         if (newPlayer.is_owner) {
           setRoomOwner(newPlayer.username);
@@ -1129,32 +1251,82 @@ function RoomPage() {
         return;
       }
 
-      // 检查当前回合状态，判断是否应该完全移除玩家
-      const currentRoundState = gameStore.getState().roomState?.roundState;
-      const isGameStarted = currentRoundState && currentRoundState !== "PENDING";
+      // 防御性处理：忽略“自己离线”广播，避免重连/多连接时序导致本地把自己标成离线
+      if (leftPlayer.id === userIdRef.current) {
+        return;
+      }
 
-      setOnlinePlayers((prev) => {
-        if (isGameStarted) {
-          // 对局已开始：保留玩家但标记为离线
-          return prev.map((p) =>
-            p.id === leftPlayer.id ? { ...p, online: false } : p
-          );
-        } else {
-          // 对局未开始：完全移除玩家
-          return prev.filter((p) => p.id !== leftPlayer.id);
-        }
-      });
+      const currentRoomState = gameStore.getState().roomState;
 
-      // 抢答队列始终移除该玩家
+      // 房间任意状态都保留玩家，仅更新在线状态
+      setOnlinePlayers((prev) =>
+        prev.map((p) => (p.id === leftPlayer.id ? { ...p, online: false } : p)),
+      );
+
+      if (currentRoomState) {
+        const nextPlayers = currentRoomState.players.map((player) =>
+          player.id === leftPlayer.id ? { ...player, online: false } : player,
+        );
+
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          players: nextPlayers,
+          playersSimple: getPlayersSimple(nextPlayers),
+        });
+      }
+
       setAnswerOrderByUserId((prev) => {
-        if (!(leftPlayer.id in prev)) return prev;
+        if (!(leftPlayer.id in prev)) {
+          return prev;
+        }
         const next = { ...prev };
-        delete next[leftPlayer.id];
+        delete next[kickedUserId];
+        return next;
+      });
+    });
+
+    wsRef.current.onJsonEvent<KickUserMessage>(GameEventId.KICK_USER, (message) => {
+      const kickedUserId = message?.data?.user_id;
+      if (typeof kickedUserId !== "number") {
+        return;
+      }
+
+      setOnlinePlayers((prev) => prev.filter((player) => player.id !== kickedUserId));
+
+      const currentRoomState = gameStore.getState().roomState;
+      if (currentRoomState) {
+        const nextPlayers = currentRoomState.players.filter(
+          (player) => player.id !== kickedUserId,
+        );
+        const nextAnswerQueue = (currentRoomState.answer_queue ?? []).filter(
+          (item) => item.player_id !== kickedUserId,
+        );
+
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          players: nextPlayers,
+          playersSimple: getPlayersSimple(nextPlayers),
+          answer_queue: nextAnswerQueue,
+        });
+      }
+
+      setAnswerOrderByUserId((prev) => {
+        if (!(kickedUserId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[kickedUserId];
         return next;
       });
 
-      if (leftPlayer.is_owner) {
-        setRoomOwner("-");
+      setCurrentAnsweringPlayer((prev) => (prev === kickedUserId ? null : prev));
+
+      if (userIdRef.current === kickedUserId) {
+        clearRoomIdentityStorage(roomId);
+        removeUser(kickedUserId);
+        pushToast({ message: "你已被房主移出房间", variant: "error" });
+        wsRef.current?.close();
+        navigate("/", { replace: true });
       }
     });
 
@@ -1352,27 +1524,16 @@ function RoomPage() {
     wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
       GameEventId.CLEAR_ANSWER_QUEUE,
       () => {
-        setAnswerOrderByUserId({});
+        syncAnswerQueueState([]);
         console.log("Answer queue cleared");
       },
     );
 
     // 处理抢答队列更新事件
-    wsRef.current.onJsonEvent<{
-      event: typeof GameEventId.ANSWER_QUEUE;
-      ts: number;
-      data: {
-        queue: Array<{ player_id: number; order: number }>;
-      };
-    }>(GameEventId.ANSWER_QUEUE, (message) => {
-      if (message.data?.queue) {
-        const orderMap: Record<number, number> = {};
-        message.data.queue.forEach((item) => {
-          orderMap[item.player_id] = item.order;
-        });
-        setAnswerOrderByUserId(orderMap);
-        console.log("Answer queue updated:", orderMap);
-      }
+    wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
+      const queue = message.data?.queue ?? [];
+      syncAnswerQueueState(queue);
+      console.log("Answer queue updated:", queue);
     });
 
     // 处理音频预加载事件
@@ -1437,8 +1598,15 @@ function RoomPage() {
     setRoomId,
     setUrl,
     setWsClient,
+    syncAnswerQueueState,
     switchAudioSourceIfNeeded,
     notifyAudioLoadError,
+    navigate,
+    pushToast,
+    addUser,
+    removeUser,
+    tokenFromSession,
+    wsAuthToken,
   ]);
 
   useEffect(() => {
@@ -1929,12 +2097,14 @@ function RoomPage() {
                   判分
                 </button>
               </div>
-              <div
+              <a
                 className="btn btn-sm  btn-soft"
-                onClick={() => navigate(`/room/${roomId}/manage`)}
+                href={`/room/${roomId}/manage`}
+                target="_blank"
+                rel="noopener noreferrer"
               >
                 管理页面
-              </div>
+              </a>
             </div>
           </div>
         ) : null}
@@ -2098,7 +2268,7 @@ function RoomPage() {
                     height={24}
                     className="inline mr-1"
                   />
-                  在线玩家
+                  玩家列表
                 </h2>
               </li>
               {sortedOnlinePlayers.length > 0 ? (
@@ -2120,28 +2290,17 @@ function RoomPage() {
                           answering={currentAnsweringPlayer === player.id}
                           isSelf={isCurrentUser}
                           online={player.online}
+                          showKickAction={isOwner && !isCurrentUser}
+                          kickDisabled={isWsDisconnected}
+                          onKick={() => handleRemovePlayer(player.id)}
                         />
-                        {isOwner && !isCurrentUser && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-xs ml-2"
-                            disabled={isWsDisconnected}
-                            onClick={() => handleRemovePlayer(player.id)}
-                          >
-                            <Icon
-                              icon="heroicons:trash-2"
-                              width={16}
-                              height={16}
-                            />
-                          </button>
-                        )}
                       </div>
                     </li>
                   );
                 })
               ) : (
                 <li className="list-row px-2 text-sm opacity-60">
-                  暂无在线玩家
+                  暂无玩家
                 </li>
               )}
             </ul>
@@ -2217,14 +2376,6 @@ function RoomPage() {
           </div>
         </div>
       </div>
-
-      {audioLoadError ? (
-        <div className="toast toast-top toast-center z-50">
-          <div role="alert" className="alert alert-soft alert-error">
-            <span>{audioLoadError}</span>
-          </div>
-        </div>
-      ) : null}
 
       {isVolumeToastVisible ? (
         <div className="toast toast-top toast-start z-50">

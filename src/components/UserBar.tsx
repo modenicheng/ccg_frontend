@@ -1,4 +1,6 @@
 import clsx from "clsx";
+import { Icon } from "@iconify-icon/react";
+
 type UserBarProps = {
   username: string;
   order?: number;
@@ -6,6 +8,9 @@ type UserBarProps = {
   answering?: boolean;
   isSelf?: boolean;
   online?: boolean;
+  showKickAction?: boolean;
+  kickDisabled?: boolean;
+  onKick?: () => void;
 };
 
 export const UserBar: React.FC<UserBarProps> = ({
@@ -15,6 +20,9 @@ export const UserBar: React.FC<UserBarProps> = ({
   answering = false,
   isSelf = false,
   online = true,
+  showKickAction = false,
+  kickDisabled = false,
+  onKick,
 }) => {
   return (
     <>
@@ -25,6 +33,8 @@ export const UserBar: React.FC<UserBarProps> = ({
           "bg-primary/10": activate && !answering,
           "buzz-ordered-item": typeof order === "number",
           "opacity-60": !online,
+          "buzz-activate-pop": activate,
+          "opacity-50": !online,
         })}
       >
         <div className="card-body p-2 w-full overflow-hidden">
@@ -63,6 +73,22 @@ export const UserBar: React.FC<UserBarProps> = ({
                 ●
               </div>
             )}
+            <div className="ml-auto flex items-center gap-1">
+              {isSelf ? <div className="badge badge-soft badge-info">我</div> : null}
+              {!online ? <div className="badge badge-soft badge-neutral text-xs">离线</div> : null}
+              {showKickAction && onKick ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs text-error"
+                  disabled={kickDisabled}
+                  onClick={onKick}
+                  aria-label={`踢出玩家 ${username}`}
+                  title={`踢出 ${username}`}
+                >
+                  <Icon icon="heroicons:trash-2" width={14} height={14} />
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

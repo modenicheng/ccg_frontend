@@ -44,6 +44,23 @@ import {
   shuffleRoomSongs,
   type RoomSong,
 } from "../api/room_songs";
+import useErrorToastStore from "../stores/errorToastStore";
+import usePersistStore from "../stores/persistStore";
+
+const readCookie = (name: string): string | null => {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matched = document.cookie.match(
+    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
+  );
+  if (!matched) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(matched[1]);
+  } catch {
+    return matched[1];
+  }
+};
 
 function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
   const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
@@ -74,6 +91,24 @@ const RoomManagePage = () => {
   const navigate = useNavigate();
   const { roomState } = useGameStore();
   const { wsClient } = useWebSocketStore();
+  const pushToast = useErrorToastStore((state) => state.pushToast);
+  const persistedRoomUser = usePersistStore((state) =>
+    roomid ? state.getRoomUser(roomid) : undefined,
+  );
+
+  const roomId = roomid?.trim() ?? "";
+  const sessionUserId = Number.parseInt(
+    roomId ? sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "" : "",
+    10,
+  );
+  const cookieUserId = Number.parseInt(
+    roomId ? readCookie(`ccg-room-user-id:${roomId}`) ?? "" : "",
+    10,
+  );
+  const currentUserId =
+    persistedRoomUser?.id ??
+    (Number.isFinite(sessionUserId) ? sessionUserId : null) ??
+    (Number.isFinite(cookieUserId) ? cookieUserId : null);
 
   const [title, setTitle] = useState<string>("");
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
@@ -329,14 +364,39 @@ const RoomManagePage = () => {
         return;
       }
 
+      if (currentUserId === null) {
+        navigate("/", { replace: true });
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
       try {
-        const [roomInfo, allGroups] = await Promise.all([
-          getRoomInfo(roomid),
-          loadTagGroups(),
-        ]);
+        const roomInfo = (await getRoomInfo(roomid)) as RoomInfoResponse & {
+          playersDetailed?: Array<{
+            id: number;
+            username: string;
+            is_owner: boolean;
+          }>;
+        };
+
+        const currentPlayer = roomInfo.playersDetailed?.find(
+          (player) => player.id === currentUserId,
+        );
+        const hostPlayerId = Number.parseInt(roomInfo.hostPlayerId, 10);
+        const isCurrentUserOwner =
+          currentPlayer?.is_owner ??
+          (Number.isFinite(hostPlayerId) && currentUserId !== null
+            ? hostPlayerId === currentUserId
+            : false);
+
+        if (!isCurrentUserOwner) {
+          navigate(`/room/${roomid}`, { replace: true });
+          return;
+        }
+
+        const allGroups = await loadTagGroups();
         setRoomSongsPage(1);
         await loadRoomSongs(1);
 
@@ -373,7 +433,7 @@ const RoomManagePage = () => {
     return () => {
       isMounted = false;
     };
-  }, [loadRoomSongs, loadTagGroups, navigate, roomid]);
+  }, [currentUserId, loadRoomSongs, loadTagGroups, navigate, roomid]);
 
   useEffect(() => {
     if (!manageError && !manageSuccess) {
@@ -404,6 +464,76 @@ const RoomManagePage = () => {
       window.clearTimeout(timer);
     };
   }, [roomSongsError, roomSongsSuccess]);
+
+  useEffect(() => {
+    if (!manageError) {
+      return;
+    }
+    pushToast({ message: manageError, variant: "error" });
+  }, [manageError, pushToast]);
+
+  useEffect(() => {
+    if (!manageSuccess) {
+      return;
+    }
+    pushToast({ message: manageSuccess, variant: "success" });
+  }, [manageSuccess, pushToast]);
+
+  useEffect(() => {
+    if (!error) {
+      return;
+    }
+    pushToast({ message: error, variant: "error" });
+  }, [error, pushToast]);
+
+  useEffect(() => {
+    if (!success) {
+      return;
+    }
+    pushToast({ message: success, variant: "success" });
+  }, [success, pushToast]);
+
+  useEffect(() => {
+    if (!roomSongsError) {
+      return;
+    }
+    pushToast({ message: roomSongsError, variant: "error" });
+  }, [roomSongsError, pushToast]);
+
+  useEffect(() => {
+    if (!roomSongsSuccess) {
+      return;
+    }
+    pushToast({ message: roomSongsSuccess, variant: "success" });
+  }, [roomSongsSuccess, pushToast]);
+
+  useEffect(() => {
+    if (!kickError) {
+      return;
+    }
+    pushToast({ message: kickError, variant: "error" });
+  }, [kickError, pushToast]);
+
+  useEffect(() => {
+    if (!kickSuccess) {
+      return;
+    }
+    pushToast({ message: kickSuccess, variant: "success" });
+  }, [kickSuccess, pushToast]);
+
+  useEffect(() => {
+    if (!songManageError) {
+      return;
+    }
+    pushToast({ message: songManageError, variant: "error" });
+  }, [songManageError, pushToast]);
+
+  useEffect(() => {
+    if (!songManageSuccess) {
+      return;
+    }
+    pushToast({ message: songManageSuccess, variant: "success" });
+  }, [songManageSuccess, pushToast]);
 
   const hasChanges = useMemo(() => {
     const titleChanged = title.trim() !== initialTitle.trim();
@@ -2469,76 +2599,6 @@ const RoomManagePage = () => {
         </form>
       </dialog>
 
-      {(manageError || manageSuccess) && (
-        <div className="toast toast-top toast-center z-50">
-          {manageError ? (
-            <div className="alert alert-soft alert-error">
-              <span>{manageError}</span>
-            </div>
-          ) : null}
-          {manageSuccess ? (
-            <div className="alert alert-soft alert-success">
-              <span>{manageSuccess}</span>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {(error || success) && (
-        <div className="toast toast-top toast-center z-50">
-          {error ? (
-            <div className="alert alert-soft alert-error">
-              <span>{error}</span>
-            </div>
-          ) : null}
-          {success ? (
-            <div className="alert alert-soft alert-success">
-              <span>{success}</span>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {(roomSongsError || roomSongsSuccess) && (
-        <div className="toast toast-top toast-center z-50">
-          {roomSongsError ? (
-            <div className="alert alert-soft alert-error">
-              <span>{roomSongsError}</span>
-            </div>
-          ) : null}
-          {roomSongsSuccess ? (
-            <div className="alert alert-soft alert-success">
-              <span>{roomSongsSuccess}</span>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {(kickError || kickSuccess) && (
-        <div className="toast toast-top toast-center z-50">
-          {kickError ? (
-            <div className="alert alert-soft alert-error">
-              <span>{kickError}</span>
-            </div>
-          ) : null}
-          {kickSuccess ? (
-            <div className="alert alert-soft alert-success">
-              <span>{kickSuccess}</span>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {(songManageError || songManageSuccess) && (
-        <div className="toast toast-top toast-center z-50">
-          {songManageError ? (
-            <div className="alert alert-soft alert-error">
-              <span>{songManageError}</span>
-            </div>
-          ) : null}
-          {songManageSuccess ? (
-            <div className="alert alert-soft alert-success">
-              <span>{songManageSuccess}</span>
-            </div>
-          ) : null}
-        </div>
-      )}
     </div>
   );
 };

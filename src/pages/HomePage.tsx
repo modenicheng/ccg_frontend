@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
 import usePersistStore from "../stores/persistStore";
+import useErrorToastStore from "../stores/errorToastStore";
 import { syncRoomAuthToCookieAndSession } from "../utils/roomAuth";
 
 type HomeTab = "create" | "join" | "watch";
@@ -17,25 +18,24 @@ function HomePage() {
   const [watchRoomIdInput, setWatchRoomIdInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const persistStore = usePersistStore();
+  const pushToast = useErrorToastStore((state) => state.pushToast);
 
   const handleCreateRoom = async (ev: FormEvent) => {
     ev.preventDefault();
     const hostName = hostNameInput.trim();
     const title = titleInput.trim();
     if (!hostName) {
-      setError("请输入房主名称");
+      pushToast({ message: "请输入房主名称", variant: "error" });
       return;
     }
     if (!title) {
-      setError("请输入房间标题");
+      pushToast({ message: "请输入房间标题", variant: "error" });
       return;
     }
 
     setCreating(true);
-    setError(null);
     try {
       const room = await createRoom({
         hostName,
@@ -52,7 +52,10 @@ function HomePage() {
       });
       navigate(`/room/${room.roomId}`);
     } catch (e) {
-      setError((e as Error).message || "创建房间失败");
+      pushToast({
+        message: (e as Error).message || "创建房间失败",
+        variant: "error",
+      });
     } finally {
       setCreating(false);
     }
@@ -64,16 +67,15 @@ function HomePage() {
     const username = joinNameInput.trim();
 
     if (!roomId) {
-      setError("请输入房间号");
+      pushToast({ message: "请输入房间号", variant: "error" });
       return;
     }
     if (!username) {
-      setError("请输入用户名");
+      pushToast({ message: "请输入用户名", variant: "error" });
       return;
     }
 
     setJoining(true);
-    setError(null);
     try {
       const result = await joinRoom({ roomId, username });
       syncRoomAuthToCookieAndSession(result.roomId, {
@@ -87,7 +89,10 @@ function HomePage() {
       });
       navigate(`/room/${result.roomId}`);
     } catch (e) {
-      setError((e as Error).message || "加入房间失败");
+      pushToast({
+        message: (e as Error).message || "加入房间失败",
+        variant: "error",
+      });
     } finally {
       setJoining(false);
     }
@@ -110,7 +115,6 @@ function HomePage() {
               type="button"
               onClick={() => {
                 setActiveTab("create");
-                setError(null);
               }}
             >
               创建房间
@@ -121,7 +125,6 @@ function HomePage() {
               type="button"
               onClick={() => {
                 setActiveTab("join");
-                setError(null);
               }}
             >
               加入房间
@@ -132,7 +135,6 @@ function HomePage() {
               type="button"
               onClick={() => {
                 setActiveTab("watch");
-                setError(null);
               }}
             >
               观战
@@ -204,7 +206,7 @@ function HomePage() {
               ev.preventDefault();
               const roomId = watchRoomIdInput.trim();
               if (!roomId) {
-                setError("请输入房间号");
+                pushToast({ message: "请输入房间号", variant: "error" });
                 return;
               }
               navigate(`/room/${roomId}/watch`);
@@ -228,7 +230,6 @@ function HomePage() {
             </form>
           )}
 
-          {error ? <div className="alert alert-error">{error}</div> : null}
         </div>
       </div>
     </div>

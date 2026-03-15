@@ -14,12 +14,15 @@ import { UserBar, SongInfoCard } from "../components";
 import type {
   WsTagGroup,
   WsPlayer,
+  AnswerQueueItem,
   RoomStateMessage,
   PlayControlMessage,
   AttemptAnswerMessage,
+  AnswerQueueMessage,
   YourTurnMessage,
   AnswerBroadcastMessage,
   RoundStartMessage,
+  ClearAnswerQueueMessage,
   PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
@@ -31,7 +34,7 @@ import {
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
-const AUDIO_SYNC_THRESHOLD_MS = 40;
+const AUDIO_SYNC_THRESHOLD_MS = 20;
 const CANVAS_INIT_DELAY_MS = 0;
 
 const buildWsUrl = (roomId: string) => {
@@ -125,6 +128,10 @@ function SpectatorPage() {
       if (bHasOrder) {
         return 1;
       }
+      // 没有答题顺序时在线优先
+      if (a.online !== b.online) {
+        return a.online ? -1 : 1;
+      }
       return a.id - b.id;
     });
   }, [answerOrderByUserId, onlinePlayers]);
@@ -145,14 +152,20 @@ function SpectatorPage() {
         return;
       }
 
-      const now = getCalibratedNow();
-      // offset_ts可能为null，如果为null则使用消息的时间戳
-      const offsetTs =
-        typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
-          ? controlData.offset_ts
-          : message.ts;
-      const elapsed = Math.max(0, now - offsetTs);
-      const expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      const isPauseEvent = message.event === GameEventId.PAUSE;
+      let expectedMs = Math.max(0, controlData.progress_ms);
+
+      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示“冻结时刻”，不应继续累加 elapsed
+      if (!isPauseEvent) {
+        const now = getCalibratedNow();
+        const offsetTs =
+          typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
+            ? controlData.offset_ts
+            : message.ts;
+        const elapsed = Math.max(0, now - offsetTs);
+        expectedMs = Math.max(0, controlData.progress_ms + elapsed);
+      }
+
       const localMs = audioRef.current.currentTimeMs;
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
@@ -173,6 +186,27 @@ function SpectatorPage() {
     setPlayerAnswers([]);
     setIsJudging(false);
     setCurrentSong(null);
+  }, []);
+
+  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+    setAnswerOrderByUserId(
+      queue.reduce<Record<number, number>>((acc, item, index) => {
+        const order = item.order ?? index + 1;
+        acc[item.player_id] = order;
+        return acc;
+      }, {}),
+    );
+
+    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    setCurrentAnsweringPlayer(answeringPlayer);
+
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        answer_queue: queue,
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -258,7 +292,10 @@ function SpectatorPage() {
 
             // 创建伪PlayControlMessage用于applyRemoteProgress
             const pseudoMessage = {
-              event: GameEventId.PLAY, // 事件类型不影响applyRemoteProgress逻辑
+              event:
+                playbackStatus.play_state === "paused"
+                  ? GameEventId.PAUSE
+                  : GameEventId.PLAY,
               ts: playbackStatus.updated_at,
               data: {
                 progress_ms: playbackStatus.progress_ms,
@@ -302,15 +339,9 @@ function SpectatorPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        setOnlinePlayers(payload.players.filter((player) => player.online));
-        setAnswerOrderByUserId(
-          payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
-            const order =
-              item.order ?? acc[item.player_id] ?? Object.keys(acc).length + 1;
-            acc[item.player_id] = order;
-            return acc;
-          }, {}),
-        );
+        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
+        setOnlinePlayers(payload.players);
+        syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
       },
@@ -340,6 +371,7 @@ function SpectatorPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
+      syncAnswerQueueState([]);
     });
 
     wsRef.current.onJsonEvent<AttemptAnswerMessage>(
@@ -367,6 +399,17 @@ function SpectatorPage() {
       if (typeof turnUserId === "number") {
         setCurrentAnsweringPlayer(turnUserId);
       }
+    });
+
+    wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
+      GameEventId.CLEAR_ANSWER_QUEUE,
+      () => {
+        syncAnswerQueueState([]);
+      },
+    );
+
+    wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
+      syncAnswerQueueState(message.data?.queue ?? []);
     });
 
     wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
@@ -544,6 +587,33 @@ function SpectatorPage() {
           }
         });
 
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          const existingIndex = currentRoomState.players.findIndex(
+            (player) => player.id === newPlayer.id,
+          );
+
+          let nextPlayers: WsPlayer[];
+          if (existingIndex >= 0) {
+            nextPlayers = currentRoomState.players.map((player) =>
+              player.id === newPlayer.id
+                ? { ...player, ...newPlayer, online: true }
+                : player,
+            );
+          } else {
+            nextPlayers = [
+              ...currentRoomState.players,
+              { ...newPlayer, online: true },
+            ];
+          }
+
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            players: nextPlayers,
+            playersSimple: getPlayersSimple(nextPlayers),
+          });
+        }
+
         // 如果新玩家是房主，更新房主信息
         if (newPlayer.is_owner) {
           setRoomOwner(newPlayer.username);
@@ -567,7 +637,25 @@ function SpectatorPage() {
         return;
       }
 
-      setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
+      const currentRoomState = gameStore.getState().roomState;
+
+      // 房间任意状态都保留玩家，仅更新在线状态
+      setOnlinePlayers((prev) =>
+        prev.map((p) => (p.id === leftPlayer.id ? { ...p, online: false } : p)),
+      );
+
+      if (currentRoomState) {
+        const nextPlayers = currentRoomState.players.map((player) =>
+          player.id === leftPlayer.id ? { ...player, online: false } : player,
+        );
+
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          players: nextPlayers,
+          playersSimple: getPlayersSimple(nextPlayers),
+        });
+      }
+
       setAnswerOrderByUserId((prev) => {
         if (!(leftPlayer.id in prev)) {
           return prev;
@@ -576,10 +664,6 @@ function SpectatorPage() {
         delete next[leftPlayer.id];
         return next;
       });
-
-      if (leftPlayer.is_owner) {
-        setRoomOwner("-");
-      }
     });
 
     // 处理游戏开始事件
@@ -670,6 +754,7 @@ function SpectatorPage() {
     setRoomId,
     setUrl,
     setWsClient,
+    syncAnswerQueueState,
   ]);
 
   useEffect(() => {
@@ -852,7 +937,7 @@ function SpectatorPage() {
                     height={24}
                     className="inline mr-1"
                   />
-                  在线玩家
+                  玩家列表
                 </h2>
               </li>
               {sortedOnlinePlayers.length > 0 ? (
@@ -872,6 +957,7 @@ function SpectatorPage() {
                           activate={typeof order === "number"}
                           answering={currentAnsweringPlayer === player.id}
                           isSelf={false}
+                          online={player.online}
                         />
                       </div>
                     </li>
@@ -879,7 +965,7 @@ function SpectatorPage() {
                 })
               ) : (
                 <li className="list-row px-2 text-sm opacity-60">
-                  暂无在线玩家
+                  暂无玩家
                 </li>
               )}
             </ul>
