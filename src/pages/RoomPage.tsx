@@ -27,6 +27,7 @@ import type {
   StartPosUpdateMessage,
   GameOverMessage,
   ClearAnswerQueueMessage,
+  KickUserMessage,
   PreloadAudioMessage,
 } from "../types/wsMessages";
 import {
@@ -91,6 +92,24 @@ const readCookie = (name: string): string | null => {
   }
 };
 
+const clearCookie = (name: string) => {
+  document.cookie = `${name}=; path=/; Max-Age=0; SameSite=Lax`;
+};
+
+const clearRoomIdentityStorage = (roomId: string) => {
+  const tokenKey = `ccg-room-token:${roomId}`;
+  const userIdKey = `ccg-room-user-id:${roomId}`;
+  const usernameKey = `ccg-room-username:${roomId}`;
+
+  sessionStorage.removeItem(tokenKey);
+  sessionStorage.removeItem(userIdKey);
+  sessionStorage.removeItem(usernameKey);
+
+  clearCookie(tokenKey);
+  clearCookie(userIdKey);
+  clearCookie(usernameKey);
+};
+
 const parseErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message) {
     return `${fallback}：${error.message}`;
@@ -142,6 +161,8 @@ function RoomPage() {
     volume: persistVolume,
     setVolume: setPersistVolume,
     getRoomUser,
+    addUser,
+    removeUser,
   } = usePersistStore();
   const user = getRoomUser(roomId);
   const pushToast = useErrorToastStore((state) => state.pushToast);
@@ -153,6 +174,11 @@ function RoomPage() {
     readCookie(`ccg-room-user-id:${roomId}`) ?? "",
     10,
   );
+  const tokenFromSession =
+    sessionStorage.getItem(`ccg-room-token:${roomId}`)?.trim() || null;
+  const tokenFromCookie = readCookie(`ccg-room-token:${roomId}`)?.trim() || null;
+  const tokenFromPersist = user?.token?.trim() || null;
+  const wsAuthToken = tokenFromSession ?? tokenFromCookie ?? tokenFromPersist;
   const userId =
     user?.id ??
     (Number.isFinite(fallbackUserIdFromSession)
@@ -162,8 +188,6 @@ function RoomPage() {
       ? fallbackUserIdFromCookie
       : null);
 
-  // 简化身份鉴权：仅判定是否为房主
-  const isOwner = user?.isOwner || false;
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
   const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
@@ -223,6 +247,17 @@ function RoomPage() {
   // 准备和倒计时状态
   const [isReady, setIsReady] = useState<boolean>(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+
+  // 房主判定：优先使用持久化身份，回退到房间实时玩家列表判定（避免本地状态缺失导致误判）
+  const isOwner = useMemo(() => {
+    if (user?.isOwner) {
+      return true;
+    }
+    if (userId === null || !roomState?.players?.length) {
+      return false;
+    }
+    return roomState.players.some((player) => player.id === userId && player.is_owner);
+  }, [roomState?.players, user?.isOwner, userId]);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -326,6 +361,10 @@ function RoomPage() {
       }
       if (bHasOrder) {
         return 1;
+      }
+      // 没有答题顺序时在线优先
+      if (a.online !== b.online) {
+        return a.online ? -1 : 1;
       }
       return a.id - b.id;
     });
@@ -710,14 +749,17 @@ function RoomPage() {
   }, [sendPlaybackControl]);
 
   useEffect(() => {
-    if (!roomId) {
+    if (!roomId || !wsAuthToken) {
       return;
     }
 
     let isDisposed = false;
 
-    const token = sessionStorage.getItem(`ccg-room-token:${roomId}`);
-    const wsUrl = buildWsUrl(roomId, token);
+    if (tokenFromSession !== wsAuthToken) {
+      sessionStorage.setItem(`ccg-room-token:${roomId}`, wsAuthToken);
+    }
+
+    const wsUrl = buildWsUrl(roomId, wsAuthToken);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);
@@ -730,6 +772,31 @@ function RoomPage() {
           return;
         }
         const payload = message.data;
+
+        // 使用 ROOM_STATE 作为权威来源，自动纠正本地持久化身份（尤其是 isOwner）
+        const currentUserId = userIdRef.current;
+        if (typeof currentUserId === "number" && wsAuthToken) {
+          const selfPlayer = payload.players.find((player) => player.id === currentUserId);
+          if (selfPlayer) {
+            const persistedUser = usePersistStore.getState().getRoomUser(payload.room_id);
+            const shouldUpdatePersistUser =
+              !persistedUser ||
+              persistedUser.id !== selfPlayer.id ||
+              persistedUser.username !== selfPlayer.username ||
+              persistedUser.token !== wsAuthToken ||
+              persistedUser.isOwner !== selfPlayer.is_owner;
+
+            if (shouldUpdatePersistUser) {
+              addUser({
+                id: selfPlayer.id,
+                roomId: payload.room_id,
+                username: selfPlayer.username,
+                token: wsAuthToken,
+                isOwner: selfPlayer.is_owner,
+              });
+            }
+          }
+        }
 
         // 从玩家列表中获取房主
         const ownerPlayer = payload.players.find((p) => p.is_owner);
@@ -847,7 +914,8 @@ function RoomPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        setOnlinePlayers(payload.players.filter((player) => player.online));
+        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
+        setOnlinePlayers(payload.players);
         syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
@@ -1172,9 +1240,13 @@ function RoomPage() {
         return;
       }
 
-      setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
-
       const currentRoomState = gameStore.getState().roomState;
+
+      // 房间任意状态都保留玩家，仅更新在线状态
+      setOnlinePlayers((prev) =>
+        prev.map((p) => (p.id === leftPlayer.id ? { ...p, online: false } : p)),
+      );
+
       if (currentRoomState) {
         const nextPlayers = currentRoomState.players.map((player) =>
           player.id === leftPlayer.id ? { ...player, online: false } : player,
@@ -1195,6 +1267,51 @@ function RoomPage() {
         delete next[leftPlayer.id];
         return next;
       });
+    });
+
+    wsRef.current.onJsonEvent<KickUserMessage>(GameEventId.KICK_USER, (message) => {
+      const kickedUserId = message?.data?.user_id;
+      if (typeof kickedUserId !== "number") {
+        return;
+      }
+
+      setOnlinePlayers((prev) => prev.filter((player) => player.id !== kickedUserId));
+
+      const currentRoomState = gameStore.getState().roomState;
+      if (currentRoomState) {
+        const nextPlayers = currentRoomState.players.filter(
+          (player) => player.id !== kickedUserId,
+        );
+        const nextAnswerQueue = (currentRoomState.answer_queue ?? []).filter(
+          (item) => item.player_id !== kickedUserId,
+        );
+
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          players: nextPlayers,
+          playersSimple: getPlayersSimple(nextPlayers),
+          answer_queue: nextAnswerQueue,
+        });
+      }
+
+      setAnswerOrderByUserId((prev) => {
+        if (!(kickedUserId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[kickedUserId];
+        return next;
+      });
+
+      setCurrentAnsweringPlayer((prev) => (prev === kickedUserId ? null : prev));
+
+      if (userIdRef.current === kickedUserId) {
+        clearRoomIdentityStorage(roomId);
+        removeUser(kickedUserId);
+        pushToast({ message: "你已被房主移出房间", variant: "error" });
+        wsRef.current?.close();
+        navigate("/", { replace: true });
+      }
     });
 
     // 处理玩家准备事件
@@ -1468,6 +1585,12 @@ function RoomPage() {
     syncAnswerQueueState,
     switchAudioSourceIfNeeded,
     notifyAudioLoadError,
+    navigate,
+    pushToast,
+    addUser,
+    removeUser,
+    tokenFromSession,
+    wsAuthToken,
   ]);
 
   useEffect(() => {
@@ -2127,7 +2250,7 @@ function RoomPage() {
                     height={24}
                     className="inline mr-1"
                   />
-                  在线玩家
+                  玩家列表
                 </h2>
               </li>
               {sortedOnlinePlayers.length > 0 ? (
@@ -2148,28 +2271,18 @@ function RoomPage() {
                           activate={typeof order === "number"}
                           answering={currentAnsweringPlayer === player.id}
                           isSelf={isCurrentUser}
+                          online={player.online}
+                          showKickAction={isOwner && !isCurrentUser}
+                          kickDisabled={isWsDisconnected}
+                          onKick={() => handleRemovePlayer(player.id)}
                         />
-                        {isOwner && !isCurrentUser && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-xs ml-2"
-                            disabled={isWsDisconnected}
-                            onClick={() => handleRemovePlayer(player.id)}
-                          >
-                            <Icon
-                              icon="heroicons:trash-2"
-                              width={16}
-                              height={16}
-                            />
-                          </button>
-                        )}
                       </div>
                     </li>
                   );
                 })
               ) : (
                 <li className="list-row px-2 text-sm opacity-60">
-                  暂无在线玩家
+                  暂无玩家
                 </li>
               )}
             </ul>

@@ -277,6 +277,16 @@ export interface ClearAnswerQueueMessage {
   data: ClearAnswerQueueData;
 }
 
+export interface KickUserData {
+  user_id: number;
+}
+
+export interface KickUserMessage {
+  event: typeof GameEventId.KICK_USER;
+  ts: number;
+  data: KickUserData;
+}
+
 // 预加载音频数据
 export interface PreloadAudioData {
   audio_url: string;
@@ -304,4 +314,5 @@ export type WsMessage =
   | StartPosUpdateMessage
   | GameOverMessage
   | ClearAnswerQueueMessage
+  | KickUserMessage
   | PreloadAudioMessage;

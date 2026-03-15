@@ -128,6 +128,10 @@ function SpectatorPage() {
       if (bHasOrder) {
         return 1;
       }
+      // 没有答题顺序时在线优先
+      if (a.online !== b.online) {
+        return a.online ? -1 : 1;
+      }
       return a.id - b.id;
     });
   }, [answerOrderByUserId, onlinePlayers]);
@@ -335,7 +339,8 @@ function SpectatorPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        setOnlinePlayers(payload.players.filter((player) => player.online));
+        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
+        setOnlinePlayers(payload.players);
         syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
@@ -632,9 +637,13 @@ function SpectatorPage() {
         return;
       }
 
-      setOnlinePlayers((prev) => prev.filter((p) => p.id !== leftPlayer.id));
-
       const currentRoomState = gameStore.getState().roomState;
+
+      // 房间任意状态都保留玩家，仅更新在线状态
+      setOnlinePlayers((prev) =>
+        prev.map((p) => (p.id === leftPlayer.id ? { ...p, online: false } : p)),
+      );
+
       if (currentRoomState) {
         const nextPlayers = currentRoomState.players.map((player) =>
           player.id === leftPlayer.id ? { ...player, online: false } : player,
@@ -928,7 +937,7 @@ function SpectatorPage() {
                     height={24}
                     className="inline mr-1"
                   />
-                  在线玩家
+                  玩家列表
                 </h2>
               </li>
               {sortedOnlinePlayers.length > 0 ? (
@@ -948,6 +957,7 @@ function SpectatorPage() {
                           activate={typeof order === "number"}
                           answering={currentAnsweringPlayer === player.id}
                           isSelf={false}
+                          online={player.online}
                         />
                       </div>
                     </li>
@@ -955,7 +965,7 @@ function SpectatorPage() {
                 })
               ) : (
                 <li className="list-row px-2 text-sm opacity-60">
-                  暂无在线玩家
+                  暂无玩家
                 </li>
               )}
             </ul>
