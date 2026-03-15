@@ -1240,6 +1240,11 @@ function RoomPage() {
         return;
       }
 
+      // 防御性处理：忽略“自己离线”广播，避免重连/多连接时序导致本地把自己标成离线
+      if (leftPlayer.id === userIdRef.current) {
+        return;
+      }
+
       const currentRoomState = gameStore.getState().roomState;
 
       // 房间任意状态都保留玩家，仅更新在线状态
