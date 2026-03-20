@@ -268,6 +268,15 @@ function RoomPage() {
 
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (roomId) {
+      const roomTitle = roomState?.title;
+      document.title = roomTitle
+        ? `CCG - 房间${roomTitle}|${roomId}`
+        : `CCG - 房间${roomId}`;
+    }
+  }, [roomId, roomState?.title]);
+
   const audioRef = useRef<audioPlayer | null>(null);
   const isOwnerRef = useRef<boolean>(false);
   const userIdRef = useRef<number | null>(userId);

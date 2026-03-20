@@ -55,17 +55,18 @@ const mapRoomSong = (roomSong: BackendRoomSong): RoomSong => ({
 export interface RoomSongsListParams {
   offset?: number;
   limit?: number;
+  kw?: string;
 }
 
 export async function getRoomSongs(
   roomId: string,
   params: RoomSongsListParams = {},
 ): Promise<RoomSongsListResponse> {
-  const { offset = 0, limit = 20 } = params;
+  const { offset = 0, limit = 20, kw } = params;
   const { data } = await http.get<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/`,
     {
-      params: { offset, limit },
+      params: { offset, limit, kw },
     },
   );
   const songs = data.list || [];
