@@ -1280,7 +1280,7 @@ function RoomPage() {
           return prev;
         }
         const next = { ...prev };
-        delete next[kickedUserId];
+        delete next[leftPlayer.id];
         return next;
       });
     });

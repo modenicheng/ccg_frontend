@@ -64,31 +64,24 @@ export const UserBar: React.FC<UserBarProps> = ({
             >
               {username}
             </div>
-            {isSelf ? <div className="badge badge-soft badge-info ml-auto">我</div> : null}
-            {!online && (
-              <div
-                className="badge badge-error badge-xs ml-auto"
-                title="玩家已断线"
-              >
-                ●
+            {isSelf || !online || (showKickAction && onKick) ? (
+              <div className="ml-auto flex items-center gap-1">
+                {isSelf ? <div className="badge badge-soft badge-info">我</div> : null}
+                {!online ? <div className="badge badge-soft badge-neutral text-xs">离线</div> : null}
+                {showKickAction && onKick ? (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-xs text-error"
+                    disabled={kickDisabled}
+                    onClick={onKick}
+                    aria-label={`踢出玩家 ${username}`}
+                    title={`踢出 ${username}`}
+                  >
+                    <Icon icon="heroicons:trash-2" width={14} height={14} />
+                  </button>
+                ) : null}
               </div>
-            )}
-            <div className="ml-auto flex items-center gap-1">
-              {isSelf ? <div className="badge badge-soft badge-info">我</div> : null}
-              {!online ? <div className="badge badge-soft badge-neutral text-xs">离线</div> : null}
-              {showKickAction && onKick ? (
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs text-error"
-                  disabled={kickDisabled}
-                  onClick={onKick}
-                  aria-label={`踢出玩家 ${username}`}
-                  title={`踢出 ${username}`}
-                >
-                  <Icon icon="heroicons:trash-2" width={14} height={14} />
-                </button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </div>
       </div>

@@ -33,6 +33,7 @@ import {
   getSonglistDetail,
   createSonglistFromPlatform,
   deleteSonglist,
+  getSonglistTaskResult,
   type Songlist,
   type CreateSonglistFromPlatformRequest,
 } from "../api/songlist";
@@ -197,6 +198,8 @@ const RoomManagePage = () => {
   const [newSonglistPlatformId, setNewSonglistPlatformId] = useState("");
   const [newSonglistCookie, setNewSonglistCookie] = useState("");
   const [isCreatingSonglist, setIsCreatingSonglist] = useState(false);
+  const [isPollingTask, setIsPollingTask] = useState(false);
+  const pollingRef = useRef<number | null>(null);
   const [pendingDeleteSonglistId, setPendingDeleteSonglistId] = useState<
     number | null
   >(null);
@@ -434,6 +437,15 @@ const RoomManagePage = () => {
       isMounted = false;
     };
   }, [currentUserId, loadRoomSongs, loadTagGroups, navigate, roomid]);
+
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current !== null) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!manageError && !manageSuccess) {
@@ -932,17 +944,25 @@ const RoomManagePage = () => {
     }
   };
 
-  const handleOpenSongManageDialog = async () => {
+  const handleOpenSongManageDialog = async (tab?: "songs" | "songlists") => {
+    const activeTab = tab ?? songManageTab;
+    if (tab) {
+      setSongManageTab(tab);
+    }
     songManageDialogRef.current?.showModal();
     setSongManageSuccess(null);
-    setSongPage(1);
-    setSongTotal(0);
-    setSonglistPage(1);
-    setSonglistTotal(0);
-    setIsSongManageLoading(true);
     setSongManageError(null);
+    setIsSongManageLoading(true);
     try {
-      await Promise.all([loadSongs(1), loadSonglists(1)]);
+      if (activeTab === "songlists") {
+        setSonglistPage(1);
+        setSonglistTotal(0);
+        await loadSonglists(1);
+      } else {
+        setSongPage(1);
+        setSongTotal(0);
+        await loadSongs(1);
+      }
     } catch (err) {
       setSongManageError((err as Error).message || "加载歌曲管理数据失败");
     } finally {
@@ -1057,15 +1077,50 @@ const RoomManagePage = () => {
         cookie_str: newSonglistCookie || undefined,
       };
       const { task_id } = await createSonglistFromPlatform(payload);
-      setSongManageSuccess(`歌单创建任务已提交，任务ID: ${task_id}`);
+      setSongManageSuccess(`歌单创建任务已提交，正在爬取...`);
       setNewSonglistPlatformId("");
       setNewSonglistCookie("");
-      // 可以轮询任务状态，这里简化，直接重新加载歌单列表
-      setTimeout(() => {
-        if (songlistPage !== 1) {
-          setSonglistPage(1);
+      setIsCreatingSonglist(false);
+      setIsPollingTask(true);
+
+      const pollTask = async () => {
+        try {
+          const result = await getSonglistTaskResult(task_id);
+          if (result.status === "finished" || result.status === "success") {
+            setSongManageSuccess("歌单导入完成");
+            setIsPollingTask(false);
+            if (pollingRef.current !== null) {
+              window.clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+            if (songlistPage !== 1) {
+              setSonglistPage(1);
+            }
+            await loadSonglists(1);
+          } else if (result.status === "failed") {
+            setSongManageError("歌单导入任务失败");
+            setIsPollingTask(false);
+            if (pollingRef.current !== null) {
+              window.clearInterval(pollingRef.current);
+              pollingRef.current = null;
+            }
+          }
+        } catch (err) {
+          setSongManageError(
+            (err as Error).message || "查询任务状态失败",
+          );
+          setIsPollingTask(false);
+          if (pollingRef.current !== null) {
+            window.clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
         }
-        loadSonglists(1);
+      };
+
+      // 立即查一次，然后每 2s 轮询
+      await pollTask();
+      pollingRef.current = window.setInterval(() => {
+        void pollTask();
       }, 2000);
     } catch (err) {
       setSongManageError((err as Error).message || "创建歌单失败");
@@ -1281,7 +1336,7 @@ const RoomManagePage = () => {
         <div className="navbar-end gap-2">
           <button
             className="btn btn-outline btn-sm"
-            onClick={handleOpenSongManageDialog}
+            onClick={() => void handleOpenSongManageDialog()}
           >
             管理歌曲 / 歌单
           </button>
@@ -1522,8 +1577,7 @@ const RoomManagePage = () => {
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={() => {
-                      setSongManageTab("songlists");
-                      void handleOpenSongManageDialog();
+                      void handleOpenSongManageDialog("songlists");
                     }}
                   >
                     <Icon icon="mdi:playlist-music" className="text-lg" />
@@ -1533,8 +1587,7 @@ const RoomManagePage = () => {
                     type="button"
                     className="btn btn-outline btn-sm"
                     onClick={() => {
-                      setSongManageTab("songs");
-                      void handleOpenSongManageDialog();
+                      void handleOpenSongManageDialog("songs");
                     }}
                   >
                     <Icon icon="mdi:music" className="text-lg" />
@@ -2067,13 +2120,25 @@ const RoomManagePage = () => {
               <div className="tabs tabs-boxed mt-4">
                 <button
                   className={`tab ${songManageTab === "songs" ? "tab-active" : ""}`}
-                  onClick={() => setSongManageTab("songs")}
+                  onClick={() => {
+                    if (songManageTab !== "songs") {
+                      setSongManageTab("songs");
+                      setSongPage(1);
+                      void loadSongs(1);
+                    }
+                  }}
                 >
                   歌曲管理
                 </button>
                 <button
                   className={`tab ${songManageTab === "songlists" ? "tab-active" : ""}`}
-                  onClick={() => setSongManageTab("songlists")}
+                  onClick={() => {
+                    if (songManageTab !== "songlists") {
+                      setSongManageTab("songlists");
+                      setSonglistPage(1);
+                      void loadSonglists(1);
+                    }
+                  }}
                 >
                   歌单管理
                 </button>
@@ -2343,7 +2408,7 @@ const RoomManagePage = () => {
                       <button
                         className="btn btn-secondary"
                         onClick={handleCreateSonglist}
-                        disabled={isCreatingSonglist}
+                        disabled={isCreatingSonglist || isPollingTask}
                       >
                         {isCreatingSonglist ? "导入中..." : "导入歌单"}
                       </button>
@@ -2351,7 +2416,15 @@ const RoomManagePage = () => {
                   </section>
 
                   <section className="card bg-base-200">
-                    <div className="card-body">
+                    <div className="card-body relative">
+                      {isPollingTask && (
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-base-200/70 rounded-box">
+                          <span className="loading loading-spinner loading-md" />
+                          <p className="mt-2 text-sm opacity-70">
+                            歌单爬取任务进行中，请稍候...
+                          </p>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="card-title text-lg">已有歌单</h4>
                         <span className="text-xs opacity-70">
@@ -2386,6 +2459,7 @@ const RoomManagePage = () => {
                                       onClick={() =>
                                         setBindSonglistId(songlist.id)
                                       }
+                                      disabled={isPollingTask}
                                     >
                                       绑定到房间
                                     </button>
@@ -2396,7 +2470,8 @@ const RoomManagePage = () => {
                                         handleDeleteSonglist(songlist.id)
                                       }
                                       disabled={
-                                        pendingDeleteSonglistId === songlist.id
+                                        pendingDeleteSonglistId === songlist.id ||
+                                        isPollingTask
                                       }
                                     >
                                       {pendingDeleteSonglistId === songlist.id
@@ -2417,7 +2492,7 @@ const RoomManagePage = () => {
                           onClick={() =>
                             void handleSonglistPageChange(songlistPage - 1)
                           }
-                          disabled={!songlistHasPrev}
+                          disabled={!songlistHasPrev || isPollingTask}
                         >
                           上一页
                         </button>
@@ -2427,7 +2502,7 @@ const RoomManagePage = () => {
                           onClick={() =>
                             void handleSonglistPageChange(songlistPage + 1)
                           }
-                          disabled={!songlistHasNext}
+                          disabled={!songlistHasNext || isPollingTask}
                         >
                           下一页
                         </button>
