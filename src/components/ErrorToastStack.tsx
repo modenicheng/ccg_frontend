@@ -88,13 +88,14 @@ export function ErrorToastStack() {
   }, [toasts, removeToast]);
 
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      Array.from(timersRef.current.values()).forEach((timer) => {
+      Array.from(timers.values()).forEach((timer) => {
         window.clearTimeout(timer.hideTimer);
         window.clearTimeout(timer.removeTimer);
         window.cancelAnimationFrame(timer.enterFrame);
       });
-      timersRef.current.clear();
+      timers.clear();
     };
   }, []);
 
