@@ -32,7 +32,7 @@ class audioPlayer {
   private highFrequencyMinPixelGap: number = 0.35;
   private smmothedData?: Float32Array;
   private smmothingFactor: number = 0.6; // 平滑因子，范围 [0, 1]，值越小越平滑
-  private preloadTable: Record<string, HTMLAudioElement> = {}; // URL -> HTMLAudioElement
+  private preloadTable: Record<string, { audio: HTMLAudioElement; loaded: boolean; error?: Error; retryCount: number }> = {};
   private frequencyBands: FrequencyBandRange[] = [];
   private frequencyBandsCacheKey = "";
 
@@ -64,6 +64,22 @@ class audioPlayer {
 
     this.analyserNode.connect(this.gainNode);
     this.gainNode.connect(this.audioCtx.destination);
+  }
+
+  /**
+   * 确保 AudioContext 处于运行状态（在用户交互后调用）
+   */
+  async ensureRunning(): Promise<void> {
+    if (this.audioCtx.state === "suspended") {
+      try {
+        await this.audioCtx.resume();
+        this.audioState = "running";
+        console.log("[AUDIO_CONTEXT] AudioContext resumed successfully");
+      } catch (err) {
+        console.error("[AUDIO_CONTEXT] Failed to resume AudioContext:", err);
+        throw err;
+      }
+    }
   }
 
   initCanvas(canvas: HTMLCanvasElement, parent: HTMLElement) {
@@ -551,19 +567,52 @@ class audioPlayer {
 
   async preload(url: string): Promise<void> {
     if (this.preloadTable[url]) {
-      return;
+      const entry = this.preloadTable[url];
+      if (entry.loaded) {
+        return; // 已加载成功
+      }
+      if (entry.error) {
+        throw entry.error; // 之前失败过
+      }
     }
+
     const audio = new Audio();
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
     audio.src = url;
     audio.loop = false;
-    this.preloadTable[url] = audio;
-    // 只要开始预加载就直接用这个开始加载的，无论是不是可以用
-    // 避免重复创建元素和请求
-    audio.oncanplaythrough = () => {
-      console.log(`Preloaded audio for URL: ${url}`);
-    };
+
+    return new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        audio.pause();
+        const err = new Error(`Preload timeout (30s) for URL: ${url}`);
+        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: 0 };
+        reject(err);
+      }, 30000); // 30秒超时
+
+      audio.oncanplaythrough = () => {
+        clearTimeout(timeout);
+        console.log(`[PRELOAD] Successfully preloaded audio: ${url}`);
+        this.preloadTable[url] = { audio, loaded: true, error: undefined, retryCount: 0 };
+        resolve();
+      };
+
+      audio.onerror = () => {
+        clearTimeout(timeout);
+        const err = new Error(`Preload failed for URL: ${url}`);
+        console.error(`[PRELOAD]`, err);
+        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: 0 };
+        reject(err);
+      };
+
+      audio.onabort = () => {
+        clearTimeout(timeout);
+        const err = new Error(`Preload aborted for URL: ${url}`);
+        console.error(`[PRELOAD]`, err);
+        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: 0 };
+        reject(err);
+      };
+    });
   }
 
   /**
@@ -578,9 +627,10 @@ class audioPlayer {
 
     let audio;
 
-    if (this.preloadTable[url]) {
-      console.log(`Using preloaded audio for URL: ${url}`);
-      audio = this.preloadTable[url];
+    const preloadedEntry = this.preloadTable[url];
+    if (preloadedEntry?.loaded) {
+      console.log(`[PLAY_URL] Using preloaded audio for URL: ${url}`);
+      audio = preloadedEntry.audio;
       // 确保音频元素属性正确
       audio.crossOrigin = "anonymous";
       audio.preload = "auto";
@@ -588,7 +638,7 @@ class audioPlayer {
       audio.currentTime = 0;
     } else {
       console.log(
-        `No preloaded audio found for URL: ${url}, creating new audio element.`,
+        `[PLAY_URL] No successfully preloaded audio found for URL: ${url}, creating new audio element.`,
       );
 
       // 2. 创建全新的 audio 元素
@@ -598,7 +648,7 @@ class audioPlayer {
       audio.src = url;
       audio.loop = false;
       // 存储预加载引用供下次使用
-      this.preloadTable[url] = audio;
+      this.preloadTable[url] = { audio, loaded: false, error: undefined, retryCount: 0 };
     }
 
     audio.ontimeupdate = this.timeUpdateCallback;
@@ -606,7 +656,7 @@ class audioPlayer {
     try {
       this.sourceNode = this.audioCtx.createMediaElementSource(audio);
     } catch (e) {
-      console.error("创建源节点失败，这不应该发生，因为 audio 是全新的", e);
+      console.error("[PLAY_URL] Failed to create media element source (should not happen with fresh audio element):", e);
       throw e;
     }
 

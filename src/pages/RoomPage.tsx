@@ -40,7 +40,6 @@ import {
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 20;
-const SYNC_AUDIO_URL = `https://cdn.modenc.top/files/Orig.mp3`;
 const CANVAS_INIT_DELAY_MS = 0;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
 const VOLUME_HOTKEY_STEP = 5;
@@ -321,6 +320,37 @@ function RoomPage() {
     pushToast({ message, variant: "error" });
   }, [pushToast]);
 
+  /**
+   * 向后端报告音频错误（如加载失败）
+   * 后端收到此消息后，应暂停游戏并通知所有客户端
+   */
+  const reportAudioError = useCallback(
+    async (errorType: "load_failed" | "sync_failed", reason: string) => {
+      if (!wsRef.current?.isConnected()) {
+        console.error("[AUDIO_ERROR_REPORT] WebSocket not connected, cannot report error");
+        return;
+      }
+
+      try {
+        const payload = {
+          event: 255, // Custom error event ID for audio issues
+          ts: Math.round(getCalibratedNow()),
+          data: {
+            error_type: errorType,
+            reason,
+            audio_url: currentAudioUrlRef.current || "unknown",
+          },
+        };
+
+        console.warn("[AUDIO_ERROR_REPORT] Reporting error to backend:", payload);
+        await wsRef.current.sendJson(payload);
+      } catch (err) {
+        console.error("[AUDIO_ERROR_REPORT] Failed to send error report:", err);
+      }
+    },
+    [getCalibratedNow],
+  );
+
   const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
     setAnswerOrderByUserId(
       queue.reduce<Record<number, number>>((acc, item, index) => {
@@ -354,6 +384,39 @@ function RoomPage() {
       };
     });
   }, []);
+
+  /**
+   * 尝试使用重试机制加载音频流
+   * 失败3次后自动向后端报告错误
+   */
+  const tryPlayUrlWithRetry = useCallback(
+    async (url: string, maxRetries: number = 3): Promise<boolean> => {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          await audioRef.current?.playUrlAsStream(url, false);
+          console.log(`[TRY_PLAY_URL] Successfully loaded audio on attempt ${attempt + 1}`);
+          return true;
+        } catch (err) {
+          console.error(
+            `[TRY_PLAY_URL] Attempt ${attempt + 1}/${maxRetries} failed:`,
+            (err as Error).message,
+          );
+          // 若不是最后一次尝试，等待500ms后重试
+          if (attempt < maxRetries - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+      }
+
+      // 所有重试都失败了，报告错误给后端
+      await reportAudioError(
+        "load_failed",
+        `Failed to load audio URL after ${maxRetries} attempts: ${url}`,
+      );
+      return false;
+    },
+    [reportAudioError],
+  );
 
   const sortedOnlinePlayers = useMemo(() => {
     return [...onlinePlayers].sort((a, b) => {
@@ -548,6 +611,12 @@ function RoomPage() {
         await audioRef.current.pause();
       }
 
+      // 若没有有效的音频URL，不发送播放控制消息
+      if (!currentAudioUrl) {
+        console.error("[PLAY_CONTROL] Cannot send playback control: no valid audio_url available");
+        return;
+      }
+
       const progressMs = audioRef.current.currentTimeMs;
       const calibratedNow = Math.round(getCalibratedNow());
       const payload: PlayControlMessage = {
@@ -556,7 +625,7 @@ function RoomPage() {
         data: {
           progress_ms: progressMs,
           offset_ts: calibratedNow,
-          audio_url: currentAudioUrl || SYNC_AUDIO_URL,
+          audio_url: currentAudioUrl,
         },
       };
 
@@ -773,6 +842,11 @@ function RoomPage() {
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);
 
+    // 确保AudioContext处于运行状态（满足浏览器自动播放政策）
+    audioRef.current?.ensureRunning().catch((err) => {
+      console.error("[WS_INIT] Failed to ensure AudioContext running:", err);
+    });
+
     wsRef.current.on(EventType.HEARTBEAT, heartbeatHandler);
     wsRef.current.onJsonEvent<RoomStateMessage>(
       GameEventId.ROOM_STATE,
@@ -865,13 +939,28 @@ function RoomPage() {
           try {
             // 检查是否需要切换音频URL
             const newAudioUrl = playbackStatus.audio_url;
-            if (newAudioUrl && newAudioUrl !== currentAudioUrlRef.current) {
-              logAudioTrigger("ROOM_STATE", newAudioUrl);
-              // 切换音频源
-              await switchAudioSourceIfNeeded(newAudioUrl);
+
+            // 1. 验证URL有效性
+            if (!newAudioUrl) {
+              console.warn("[ROOM_STATE_SYNC] Received empty audio_url from backend");
+              await reportAudioError(
+                "sync_failed",
+                "Received empty audio_url from ROOM_STATE",
+              );
+              return; // 停止本次同步
             }
 
-            // 创建伪PlayControlMessage用于applyRemoteProgress
+            // 2. 切换音频URL（自动重试3次）
+            if (newAudioUrl !== currentAudioUrlRef.current) {
+              logAudioTrigger("ROOM_STATE", newAudioUrl);
+              const switchSuccess = await tryPlayUrlWithRetry(newAudioUrl, 3);
+              if (!switchSuccess) {
+                // reportAudioError 已在 tryPlayUrlWithRetry 内部调用
+                return; // 停止本次同步
+              }
+            }
+
+            // 3. 同步进度和播放状态（仅在URL成功切换/未变化后）
             const pseudoMessage = {
               event:
                 playbackStatus.play_state === "paused"
@@ -885,21 +974,26 @@ function RoomPage() {
               },
             } as PlayControlMessage;
 
-            // 强制同步进度
             applyRemoteProgress(pseudoMessage, true);
 
-            // 同步播放状态
+            // 4. 同步播放状态
             if (playbackStatus.play_state === "playing") {
-              void audioPlayer.resume();
+              await audioPlayer.resume();
             } else if (playbackStatus.play_state === "paused") {
-              void audioPlayer.pause();
+              await audioPlayer.pause();
             }
           } catch (error) {
-            console.error("Failed to sync audio playback:", error);
+            console.error(
+              "[ROOM_STATE_SYNC] Failed to sync audio playback:",
+              error,
+            );
+            await reportAudioError(
+              "sync_failed",
+              parseErrorMessage(error, "音频同步失败"),
+            );
             notifyAudioLoadError(
               parseErrorMessage(error, "音频加载失败，请稍后重试"),
             );
-            // 音频同步失败，但继续其他初始化
           }
         }
 
@@ -958,13 +1052,25 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
-        setAnswerOrderByUserId({});
-        setCurrentAnsweringPlayer(null);
-        applyRemoteProgress(message, true);
-        await audioRef.current?.resume();
-        setIsJudging(false);
-        // 播放时隐藏曲目信息
-        setCurrentSong(null);
+        try {
+          // 1. 先同步进度（失败则不改变播放状态）
+          applyRemoteProgress(message, true);
+
+          // 2. 同步播放状态（仅在进度同步成功后）
+          await audioRef.current?.resume();
+          
+          // 3. 清理UI状态
+          setAnswerOrderByUserId({});
+          setCurrentAnsweringPlayer(null);
+          setIsJudging(false);
+          setCurrentSong(null);
+        } catch (err) {
+          console.error("[PLAY_EVENT] Failed to apply PLAY event:", err);
+          await reportAudioError(
+            "sync_failed",
+            parseErrorMessage(err, "播放同步失败"),
+          );
+        }
       },
     );
 
@@ -1179,8 +1285,19 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
-        applyRemoteProgress(message, true);
-        await audioRef.current?.pause();
+        try {
+          // 1. 先同步进度（失败则不改变播放状态）
+          applyRemoteProgress(message, true);
+
+          // 2. 同步播放状态（仅在进度同步成功后）
+          await audioRef.current?.pause();
+        } catch (err) {
+          console.error("[PAUSE_EVENT] Failed to apply PAUSE event:", err);
+          await reportAudioError(
+            "sync_failed",
+            parseErrorMessage(err, "暂停同步失败"),
+          );
+        }
       },
     );
 
@@ -1601,6 +1718,8 @@ function RoomPage() {
   }, [
     addAttemptOrder,
     applyRemoteProgress,
+    reportAudioError,
+    tryPlayUrlWithRetry,
     roomId,
     resetRoundTransientState,
     setConnected,
