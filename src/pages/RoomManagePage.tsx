@@ -124,6 +124,7 @@ const RoomManagePage = () => {
   const manageDialogRef = useRef<HTMLDialogElement | null>(null);
   const editGroupDialogRef = useRef<HTMLDialogElement | null>(null);
   const editTagDialogRef = useRef<HTMLDialogElement | null>(null);
+  const newTagInputRef = useRef<HTMLInputElement | null>(null);
   const deleteTagConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteSongConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -626,10 +627,13 @@ const RoomManagePage = () => {
     setManageError(null);
     setManageSuccess(null);
     try {
-      await createTags([trimmed]);
+      const newTags = await createTags([trimmed]);
+      gameStore.getState().addTags(newTags);
       setNewTagName("");
       setManageSuccess("Tag 创建成功");
       await loadManageData();
+      // 创建成功后自动聚焦回输入框
+      newTagInputRef.current?.focus();
     } catch (err) {
       setManageError((err as Error).message || "创建 Tag 失败");
     } finally {
@@ -667,6 +671,7 @@ const RoomManagePage = () => {
     setManageSuccess(null);
     try {
       const updatedTag = await updateTag(editingTagId, trimmedName);
+      gameStore.getState().updateTags([updatedTag]);
       await loadManageData();
       setManageSuccess(`Tag「${updatedTag.name}」已更新`);
       handleCancelEditTag();
@@ -693,6 +698,7 @@ const RoomManagePage = () => {
     setManageSuccess(null);
     try {
       await deleteTag(tag.id);
+      gameStore.getState().removeTags([tag.id]);
       await loadManageData();
 
       if (editingTagId === tag.id) {
@@ -756,11 +762,12 @@ const RoomManagePage = () => {
     setManageError(null);
     setManageSuccess(null);
     try {
-      await createTagGroup({
+      const newGroup = await createTagGroup({
         name: trimmedGroupName,
         description: newGroupDescription,
         existingTagIds: groupTagIds,
       });
+      gameStore.getState().addTagGroups([newGroup]);
       setNewGroupName("");
       setNewGroupDescription("");
       setGroupTagIds([]);
@@ -835,7 +842,7 @@ const RoomManagePage = () => {
     setManageError(null);
     setManageSuccess(null);
     try {
-      await patchTagGroup({
+      const updatedGroup = await patchTagGroup({
         id: editingGroupId,
         ...(hasNameChanged ? { name: trimmedName } : {}),
         ...(hasDescriptionChanged
@@ -844,15 +851,16 @@ const RoomManagePage = () => {
         ...(addExistingTagIds.length > 0 ? { addExistingTagIds } : {}),
         ...(removeTagIds.length > 0 ? { removeTagIds } : {}),
       });
+      gameStore.getState().updateTagGroups([updatedGroup]);
 
       const refreshedGroups = await loadTagGroups();
       setManageTagGroups(refreshedGroups);
 
-      const updatedGroup = refreshedGroups.find(
+      const finalGroup = refreshedGroups.find(
         (group) => group.id === editingGroupId,
       );
-      if (updatedGroup) {
-        handleStartEditGroup(updatedGroup);
+      if (finalGroup) {
+        handleStartEditGroup(finalGroup);
       }
 
       setManageSuccess("TagGroup 已更新");
@@ -880,6 +888,7 @@ const RoomManagePage = () => {
 
     try {
       await deleteTagGroup(group.id);
+      gameStore.getState().removeTagGroups([group.id]);
 
       const refreshedGroups = await loadTagGroups();
       setManageTagGroups(refreshedGroups);
@@ -1741,34 +1750,36 @@ const RoomManagePage = () => {
             这里用于维护全局标签与标签组；创建后可回到上方直接选择应用到房间。
           </p>
 
-          {isManageLoading ? (
-            <div className="py-10 text-center">
-              <span className="loading loading-spinner loading-lg" />
-            </div>
-          ) : (
-            <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <section className="card bg-base-200">
-                <div className="card-body gap-3">
-                  <h4 className="card-title text-lg">创建 Tag</h4>
-                  <label className="floating-label">
-                    <input
-                      className="input input-bordered w-full"
-                      value={newTagName}
-                      onChange={(e) => setNewTagName(e.target.value)}
-                      onKeyDown={handleNewTagKeyDown}
-                      placeholder="例如：二次元 / 抒情 / 国风"
-                    />
-                    <span>Tag 名称</span>
-                  </label>
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleCreateTag}
-                    disabled={isCreatingTag}
-                  >
-                    {isCreatingTag ? "创建中..." : "创建 Tag"}
-                  </button>
+          <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <section className="card bg-base-200">
+              <div className="card-body gap-3">
+                <h4 className="card-title text-lg">创建 Tag</h4>
+                <label className="floating-label">
+                  <input
+                    ref={newTagInputRef}
+                    className="input input-bordered w-full"
+                    value={newTagName}
+                    onChange={(e) => setNewTagName(e.target.value)}
+                    onKeyDown={handleNewTagKeyDown}
+                    placeholder="例如：二次元 / 抒情 / 国风"
+                  />
+                  <span>Tag 名称</span>
+                </label>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleCreateTag}
+                  disabled={isCreatingTag}
+                >
+                  {isCreatingTag ? "创建中..." : "创建 Tag"}
+                </button>
 
-                  <div className="divider my-1">现有 Tags</div>
+                <div className="divider my-1">现有 Tags</div>
+                <div className="relative min-h-12">
+                  {isManageLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-base-100/40 rounded z-10">
+                      <span className="loading loading-spinner loading-sm" />
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     {manageTags.map((tag, index) => (
                       <div
@@ -1806,6 +1817,7 @@ const RoomManagePage = () => {
                     ))}
                   </div>
                 </div>
+              </div>
               </section>
 
               <section className="card bg-base-200">
@@ -1865,7 +1877,6 @@ const RoomManagePage = () => {
                 </div>
               </section>
             </div>
-          )}
 
           <section className="card bg-base-200 mt-4">
             <div className="card-body">

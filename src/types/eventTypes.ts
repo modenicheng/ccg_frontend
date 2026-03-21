@@ -42,6 +42,10 @@ export const GameEventId = {
   SKIP_ROUND: 43,
   SHOW_ANSWER: 44,
   ROUND_STATE_UPDATE: 45,
+
+  TAGS_UPDATE: 60,
+  TAG_GROUPS_UPDATE: 61,
+  TAG_GROUP: 62,
 } as const;
 
 export type GameEventId = typeof GameEventId[keyof typeof GameEventId];

@@ -299,6 +299,47 @@ export interface PreloadAudioMessage {
   data: PreloadAudioData;
 }
 
+// 标签增量更新数据
+export interface TagsUpdateData {
+  added_tags: WsTag[];
+  updated_tags: WsTag[];
+  deleted_tag_ids: number[];
+}
+
+// 标签增量更新消息
+export interface TagsUpdateMessage {
+  event: typeof GameEventId.TAGS_UPDATE;
+  ts: number;
+  data: TagsUpdateData;
+}
+
+// 标签组增量更新数据
+export interface TagGroupsUpdateData {
+  added_tag_groups: WsTagGroup[];
+  updated_tag_groups: WsTagGroup[];
+  deleted_tag_group_ids: number[];
+}
+
+// 标签组增量更新消息
+export interface TagGroupsUpdateMessage {
+  event: typeof GameEventId.TAG_GROUPS_UPDATE;
+  ts: number;
+  data: TagGroupsUpdateData;
+}
+
+// 房间维度 tag_groups 同步数据
+export interface TagGroupData {
+  room_id: string;
+  tag_groups: WsTagGroup[];
+}
+
+// 房间维度 tag_groups 同步消息
+export interface TagGroupMessage {
+  event: typeof GameEventId.TAG_GROUP;
+  ts: number;
+  data: TagGroupData;
+}
+
 // 所有消息类型的联合类型
 export type WsMessage =
   | RoomStateMessage
@@ -315,4 +356,7 @@ export type WsMessage =
   | GameOverMessage
   | ClearAnswerQueueMessage
   | KickUserMessage
-  | PreloadAudioMessage;
+  | PreloadAudioMessage
+  | TagsUpdateMessage
+  | TagGroupsUpdateMessage
+  | TagGroupMessage;

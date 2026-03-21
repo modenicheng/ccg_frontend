@@ -2,6 +2,8 @@
 import type {
   WsTagGroup as RoomStateTagGroupItem,
   WsPlayer as RoomStatePlayerItem,
+  WsTag,
+  WsTagGroup,
   AnswerQueueItem,
   PlaybackState
 } from "./wsMessages";
@@ -84,12 +86,24 @@ export interface GameState {
   roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
   roundStateCode: 0 | 1 | 2 | 3 | 4;
 
+  // Tags state
+  allTags: WsTag[];
+  allTagGroups: WsTagGroup[];
+
   setWS: (ws: import("../wsClient").WS) => void;
   setRoomState: (roomState: RoomState) => void;
   setIsHost: (isHost: boolean) => void;
   setScores: (scores: PlayerScore[]) => void;
   setRoundState: (roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED", roundStateCode: 0 | 1 | 2 | 3 | 4) => void;
   refreshRoomState: () => Promise<void>;
+  
+  // Tags actions
+  addTags: (tags: WsTag[]) => void;
+  updateTags: (tags: WsTag[]) => void;
+  removeTags: (tagIds: number[]) => void;
+  addTagGroups: (groups: WsTagGroup[]) => void;
+  updateTagGroups: (groups: WsTagGroup[]) => void;
+  removeTagGroups: (groupIds: number[]) => void;
 }
 
 export interface PersistState {

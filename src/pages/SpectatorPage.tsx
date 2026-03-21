@@ -24,6 +24,7 @@ import type {
   RoundStartMessage,
   ClearAnswerQueueMessage,
   PreloadAudioMessage,
+  TagGroupMessage,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -419,6 +420,24 @@ function SpectatorPage() {
 
     wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
       syncAnswerQueueState(message.data?.queue ?? []);
+    });
+
+    wsRef.current.onJsonEvent<TagGroupMessage>(GameEventId.TAG_GROUP, (message) => {
+      const payload = message.data;
+      if (payload.room_id !== roomId) {
+        return;
+      }
+
+      setTagGroups(payload.tag_groups);
+
+      const currentRoomState = gameStore.getState().roomState;
+      if (currentRoomState) {
+        gameStore.getState().setRoomState({
+          ...currentRoomState,
+          tag_groups: payload.tag_groups,
+          tagGroupsSimple: getTagGroupsSimple(payload.tag_groups),
+        });
+      }
     });
 
     wsRef.current.onJsonEvent<AnswerBroadcastMessage>(

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { WS } from "../wsClient";
 import type { GameState, RoomState } from "../types/store";
+import type { WsTag, WsTagGroup } from "../types/wsMessages";
 import { getRoomInfo } from "../api/room";
 
 export const gameStore = create<GameState>((set, get) => ({
@@ -34,6 +35,8 @@ export const gameStore = create<GameState>((set, get) => ({
   scores: [],
   roundState: "PENDING",
   roundStateCode: 0,
+  allTags: [],
+  allTagGroups: [],
 
   // Action to set the WebSocket instance
   setWS: (ws: WS) => {
@@ -103,6 +106,67 @@ export const gameStore = create<GameState>((set, get) => ({
       console.error('Failed to refresh room state:', error);
     }
   },
-}));
+  // Tags actions
+  addTags: (tags: WsTag[]) => {
+    set((state) => {
+      const existingIds = new Set(state.allTags.map(t => t.id));
+      const newTags = tags.filter(t => !existingIds.has(t.id));
+      return {
+        allTags: [...state.allTags, ...newTags]
+      };
+    });
+  },
+
+  updateTags: (tags: WsTag[]) => {
+    set((state) => {
+      const tagMap = new Map(state.allTags.map(t => [t.id, t]));
+      tags.forEach(tag => {
+        tagMap.set(tag.id, tag);
+      });
+      return {
+        allTags: Array.from(tagMap.values())
+      };
+    });
+  },
+
+  removeTags: (tagIds: number[]) => {
+    set((state) => {
+      const removeIdSet = new Set(tagIds);
+      return {
+        allTags: state.allTags.filter(t => !removeIdSet.has(t.id))
+      };
+    });
+  },
+
+  addTagGroups: (groups: WsTagGroup[]) => {
+    set((state) => {
+      const existingIds = new Set(state.allTagGroups.map(g => g.id));
+      const newGroups = groups.filter(g => !existingIds.has(g.id));
+      return {
+        allTagGroups: [...state.allTagGroups, ...newGroups]
+      };
+    });
+  },
+
+  updateTagGroups: (groups: WsTagGroup[]) => {
+    set((state) => {
+      const groupMap = new Map(state.allTagGroups.map(g => [g.id, g]));
+      groups.forEach(group => {
+        groupMap.set(group.id, group);
+      });
+      return {
+        allTagGroups: Array.from(groupMap.values())
+      };
+    });
+  },
+
+  removeTagGroups: (groupIds: number[]) => {
+    set((state) => {
+      const removeIdSet = new Set(groupIds);
+      return {
+        allTagGroups: state.allTagGroups.filter(g => !removeIdSet.has(g.id))
+      };
+    });
+  },}));
 
 export const useGameStore = gameStore;

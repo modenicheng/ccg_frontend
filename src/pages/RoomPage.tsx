@@ -29,6 +29,9 @@ import type {
   ClearAnswerQueueMessage,
   KickUserMessage,
   PreloadAudioMessage,
+  TagsUpdateMessage,
+  TagGroupsUpdateMessage,
+  TagGroupMessage,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -1716,6 +1719,98 @@ function RoomPage() {
               parseErrorMessage(error, "音频预加载失败，请稍后重试"),
             );
           }
+        }
+      },
+    );
+
+    // 处理标签增量更新事件
+    wsRef.current.onJsonEvent<TagsUpdateMessage>(
+      GameEventId.TAGS_UPDATE,
+      (message) => {
+        if (isDisposed) {
+          return;
+        }
+        const { added_tags, updated_tags, deleted_tag_ids } = message.data;
+        const gameState = gameStore.getState();
+        
+        if (added_tags?.length) {
+          gameState.addTags(added_tags);
+        }
+        if (updated_tags?.length) {
+          gameState.updateTags(updated_tags);
+        }
+        if (deleted_tag_ids?.length) {
+          gameState.removeTags(deleted_tag_ids);
+        }
+        
+        console.debug("Tags updated via WebSocket:", {
+          added: added_tags?.length ?? 0,
+          updated: updated_tags?.length ?? 0,
+          deleted: deleted_tag_ids?.length ?? 0
+        });
+      },
+    );
+
+    // 处理标签组增量更新事件
+    wsRef.current.onJsonEvent<TagGroupsUpdateMessage>(
+      GameEventId.TAG_GROUPS_UPDATE,
+      (message) => {
+        if (isDisposed) {
+          return;
+        }
+        const { added_tag_groups, updated_tag_groups, deleted_tag_group_ids } = message.data;
+        const gameState = gameStore.getState();
+        
+        if (added_tag_groups?.length) {
+          gameState.addTagGroups(added_tag_groups);
+        }
+        if (updated_tag_groups?.length) {
+          gameState.updateTagGroups(updated_tag_groups);
+        }
+        if (deleted_tag_group_ids?.length) {
+          gameState.removeTagGroups(deleted_tag_group_ids);
+        }
+        
+        console.debug("Tag groups updated via WebSocket:", {
+          added: added_tag_groups?.length ?? 0,
+          updated: updated_tag_groups?.length ?? 0,
+          deleted: deleted_tag_group_ids?.length ?? 0
+        });
+      },
+    );
+
+    // 处理当前房间已选标签组同步事件（避免依赖全量 ROOM_STATE）
+    wsRef.current.onJsonEvent<TagGroupMessage>(
+      GameEventId.TAG_GROUP,
+      (message) => {
+        if (isDisposed) {
+          return;
+        }
+
+        const payload = message.data;
+        if (payload.room_id !== roomId) {
+          return;
+        }
+
+        setTagGroups(payload.tag_groups);
+        setSelectedTagByGroup((prev) => {
+          const next: Record<number, number | null> = {};
+          payload.tag_groups.forEach((group) => {
+            const prevTagId = prev[group.id] ?? null;
+            const stillValid =
+              prevTagId !== null && group.tags.some((tag) => tag.id === prevTagId);
+            next[group.id] = stillValid ? prevTagId : null;
+          });
+          return next;
+        });
+
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            tag_groups: payload.tag_groups,
+            tagGroupsSimple: getTagGroupsSimple(payload.tag_groups),
+          });
         }
       },
     );
