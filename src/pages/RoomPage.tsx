@@ -36,6 +36,7 @@ import {
   getPlayersSimple,
   getTagGroupsSimple,
 } from "../types/wsMessages";
+import { syncRoomAuthCookie, syncRoomAuthToSession } from "../utils/roomAuth";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -177,7 +178,14 @@ function RoomPage() {
     sessionStorage.getItem(`ccg-room-token:${roomId}`)?.trim() || null;
   const tokenFromCookie = readCookie(`ccg-room-token:${roomId}`)?.trim() || null;
   const tokenFromPersist = user?.token?.trim() || null;
+  const usernameFromSession =
+    sessionStorage.getItem(`ccg-room-username:${roomId}`)?.trim() || null;
+  const usernameFromCookie =
+    readCookie(`ccg-room-username:${roomId}`)?.trim() || null;
+  const usernameFromPersist = user?.username?.trim() || null;
   const wsAuthToken = tokenFromSession ?? tokenFromCookie ?? tokenFromPersist;
+  const wsAuthUsername =
+    usernameFromSession ?? usernameFromCookie ?? usernameFromPersist;
   const userId =
     user?.id ??
     (Number.isFinite(fallbackUserIdFromSession)
@@ -466,6 +474,11 @@ function RoomPage() {
       return;
     }
 
+    if (roomState?.status !== "playing") {
+      console.debug("[buzz] skip: room not in playing state");
+      return;
+    }
+
     if (userId === null) {
       console.debug("[buzz] skip: missing userId from persist/session/cookie");
       return;
@@ -494,7 +507,7 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
-  }, [addAttemptOrder, getCalibratedNow, isConnected, userId]);
+  }, [addAttemptOrder, getCalibratedNow, isConnected, userId, roomState?.status]);
 
   const handleSubmitAnswer = useCallback(() => {
     if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
@@ -833,8 +846,14 @@ function RoomPage() {
 
     let isDisposed = false;
 
-    if (tokenFromSession !== wsAuthToken) {
-      sessionStorage.setItem(`ccg-room-token:${roomId}`, wsAuthToken);
+    if (userId !== null && wsAuthUsername) {
+      const wsIdentity = {
+        id: userId,
+        token: wsAuthToken,
+        username: wsAuthUsername,
+      };
+      syncRoomAuthToSession(roomId, wsIdentity);
+      syncRoomAuthCookie(roomId, wsIdentity);
     }
 
     const wsUrl = buildWsUrl(roomId, wsAuthToken);
@@ -1564,6 +1583,7 @@ function RoomPage() {
 
         // 4. 清除抢答队列状态
         setAnswerOrderByUserId({});
+        syncAnswerQueueState([]);
 
         // 5. 清空玩家作答情况
         setPlayerAnswers([]);
@@ -1733,8 +1753,9 @@ function RoomPage() {
     pushToast,
     addUser,
     removeUser,
-    tokenFromSession,
+    userId,
     wsAuthToken,
+    wsAuthUsername,
   ]);
 
   useEffect(() => {
@@ -2329,10 +2350,10 @@ function RoomPage() {
             type="button"
             className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
               "btn-disabled":
-                !isConnected || isCurrentPlayerInAnswerQueue || !user,
+                !isConnected || isCurrentPlayerInAnswerQueue || !user || roomState?.status !== "playing",
               "btn-active": isBuzzHotkeyActive,
             })}
-            disabled={!isConnected || isCurrentPlayerInAnswerQueue || !user}
+            disabled={!isConnected || isCurrentPlayerInAnswerQueue || !user || roomState?.status !== "playing"}
             onClick={handleBuzz}
           >
             <h2 className="text-3xl">抢答！</h2>

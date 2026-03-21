@@ -34,6 +34,16 @@ const clearCookie = (name: string) => {
   document.cookie = `${name}=; path=/; Max-Age=0; SameSite=Lax`;
 };
 
+const getRoomAuthKeys = (roomId: string) => {
+  const normalizedRoomId = roomId.trim();
+  return {
+    normalizedRoomId,
+    tokenKey: `${ROOM_TOKEN_PREFIX}${normalizedRoomId}`,
+    userIdKey: `${ROOM_USER_ID_PREFIX}${normalizedRoomId}`,
+    usernameKey: `${ROOM_USERNAME_PREFIX}${normalizedRoomId}`,
+  };
+};
+
 export const clearRoomAuthCookiesExcept = (roomId: string) => {
   const normalizedRoomId = roomId.trim();
   if (!normalizedRoomId) {
@@ -66,30 +76,51 @@ export const clearRoomAuthCookiesExcept = (roomId: string) => {
     });
 };
 
-export const syncRoomAuthToCookieAndSession = (
+export const syncRoomAuthCookie = (
   roomId: string,
   identity: RoomAuthIdentity | null,
 ) => {
-  const normalizedRoomId = roomId.trim();
+  const { normalizedRoomId, tokenKey, userIdKey, usernameKey } =
+    getRoomAuthKeys(roomId);
   if (!normalizedRoomId) {
     return;
   }
-
-  clearRoomAuthCookiesExcept(normalizedRoomId);
 
   if (!identity) {
     return;
   }
 
-  const tokenKey = `${ROOM_TOKEN_PREFIX}${normalizedRoomId}`;
-  const userIdKey = `${ROOM_USER_ID_PREFIX}${normalizedRoomId}`;
-  const usernameKey = `${ROOM_USERNAME_PREFIX}${normalizedRoomId}`;
-
   setCookie(tokenKey, identity.token);
   setCookie(userIdKey, `${identity.id}`);
   setCookie(usernameKey, identity.username);
+};
+
+export const syncRoomAuthToSession = (
+  roomId: string,
+  identity: RoomAuthIdentity | null,
+) => {
+  const { normalizedRoomId, tokenKey, userIdKey, usernameKey } =
+    getRoomAuthKeys(roomId);
+  if (!normalizedRoomId) {
+    return;
+  }
+
+  if (!identity) {
+    sessionStorage.removeItem(tokenKey);
+    sessionStorage.removeItem(userIdKey);
+    sessionStorage.removeItem(usernameKey);
+    return;
+  }
 
   sessionStorage.setItem(tokenKey, identity.token);
   sessionStorage.setItem(userIdKey, `${identity.id}`);
   sessionStorage.setItem(usernameKey, identity.username);
+};
+
+export const syncRoomAuthToCookieAndSession = (
+  roomId: string,
+  identity: RoomAuthIdentity | null,
+) => {
+  syncRoomAuthCookie(roomId, identity);
+  syncRoomAuthToSession(roomId, identity);
 };

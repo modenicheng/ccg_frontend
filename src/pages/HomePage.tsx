@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
 import usePersistStore from "../stores/persistStore";
 import useErrorToastStore from "../stores/errorToastStore";
-import { syncRoomAuthToCookieAndSession } from "../utils/roomAuth";
+import { syncRoomAuthToSession } from "../utils/roomAuth";
 
 type HomeTab = "create" | "join" | "watch";
 
@@ -45,7 +45,7 @@ function HomePage() {
         hostName,
         title,
       });
-      syncRoomAuthToCookieAndSession(room.roomId, {
+      syncRoomAuthToSession(room.roomId, {
         id: room.host.id,
         token: room.host.token,
         username: room.host.username,
@@ -82,7 +82,7 @@ function HomePage() {
     setJoining(true);
     try {
       const result = await joinRoom({ roomId, username });
-      syncRoomAuthToCookieAndSession(result.roomId, {
+      syncRoomAuthToSession(result.roomId, {
         id: result.user.id,
         token: result.user.token,
         username: result.user.username,
