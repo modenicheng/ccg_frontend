@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
@@ -21,6 +21,10 @@ function HomePage() {
 
   const persistStore = usePersistStore();
   const pushToast = useErrorToastStore((state) => state.pushToast);
+
+  useEffect(() => {
+    document.title = "CCG - 主页";
+  }, []);
 
   const handleCreateRoom = async (ev: FormEvent) => {
     ev.preventDefault();

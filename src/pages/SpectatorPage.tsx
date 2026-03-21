@@ -100,6 +100,15 @@ function SpectatorPage() {
     }>
   >([]);
 
+  useEffect(() => {
+    if (roomId) {
+      const roomTitle = roomState?.title;
+      document.title = roomTitle
+        ? `CCG - 观战${roomTitle}|${roomId}`
+        : `CCG - 观战${roomId}`;
+    }
+  }, [roomId, roomState?.title]);
+
   const audioRef = useRef<audioPlayer | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
