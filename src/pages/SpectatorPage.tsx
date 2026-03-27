@@ -25,6 +25,7 @@ import type {
   ClearAnswerQueueMessage,
   PreloadAudioMessage,
   TagGroupMessage,
+  PlaybackState,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -113,6 +114,7 @@ function SpectatorPage() {
   const audioRef = useRef<audioPlayer | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  const shouldForcePlaybackResyncRef = useRef<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -219,9 +221,70 @@ function SpectatorPage() {
     }
   }, []);
 
+  const syncPlaybackStatusToRoomState = useCallback(
+    (nextPlaybackStatus: PlaybackState) => {
+      const latestRoomState = gameStore.getState().roomState;
+      if (!latestRoomState) {
+        return;
+      }
+
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        playback_status: nextPlaybackStatus,
+        playProgress: nextPlaybackStatus.progress_ms,
+      });
+    },
+    [],
+  );
+
+  const buildPlaybackStatusFromPlayControl = useCallback(
+    (message: PlayControlMessage): PlaybackState | null => {
+      if (!isPlayControlData(message?.data)) {
+        return null;
+      }
+
+      const latestRoomState = gameStore.getState().roomState;
+      const previousPlaybackStatus = latestRoomState?.playback_status;
+
+      let playState: PlaybackState["play_state"];
+      if (message.event === GameEventId.PLAY) {
+        playState = "playing";
+      } else if (message.event === GameEventId.PAUSE) {
+        playState = "paused";
+      } else {
+        playState = previousPlaybackStatus?.play_state ?? "paused";
+      }
+
+      const audioUrl =
+        message.data.audio_url ??
+        previousPlaybackStatus?.audio_url ??
+        currentAudioUrlRef.current ??
+        null;
+
+      return {
+        progress_ms: Math.max(0, message.data.progress_ms),
+        updated_at: message.ts,
+        offset_ts:
+          typeof message.data.offset_ts === "number"
+            ? Math.max(0, message.data.offset_ts)
+            : message.ts,
+        play_state: playState,
+        current_order: previousPlaybackStatus?.current_order ?? 0,
+        audio_url: audioUrl,
+      };
+    },
+    [],
+  );
+
   useEffect(() => {
     currentAudioUrlRef.current = currentAudioUrl;
   }, [currentAudioUrl]);
+
+  useEffect(() => {
+    if (!isConnected) {
+      shouldForcePlaybackResyncRef.current = true;
+    }
+  }, [isConnected]);
 
   useEffect(() => {
     if (!roomId) {
@@ -288,16 +351,24 @@ function SpectatorPage() {
         // 同步音频播放器状态
         const playbackStatus = payload.playback_status;
         const audioPlayer = audioRef.current;
+        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
+        let didLoadOrRebindAudio = false;
 
         if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
           try {
             // 检查是否需要切换音频URL
             const newAudioUrl = playbackStatus.audio_url;
-            if (newAudioUrl && newAudioUrl !== currentAudioUrlRef.current) {
+            if (
+              newAudioUrl &&
+              (shouldForcePlaybackResync ||
+                newAudioUrl !== currentAudioUrlRef.current)
+            ) {
               // 切换音频源
               await audioPlayer.preload(newAudioUrl);
               await audioPlayer.playUrlAsStream(newAudioUrl, false);
+              currentAudioUrlRef.current = newAudioUrl;
               setCurrentAudioUrl(newAudioUrl);
+              didLoadOrRebindAudio = true;
             }
 
             // 创建伪PlayControlMessage用于applyRemoteProgress
@@ -317,12 +388,20 @@ function SpectatorPage() {
             // 强制同步进度
             applyRemoteProgress(pseudoMessage, true);
 
+            // 二次校准：等待 canplaythrough 后再按最新时钟偏移重新对齐
+            if (didLoadOrRebindAudio) {
+              await audioPlayer.waitForCanPlayThrough();
+              applyRemoteProgress(pseudoMessage, true);
+            }
+
             // 同步播放状态
             if (playbackStatus.play_state === "playing") {
               void audioPlayer.resume();
             } else if (playbackStatus.play_state === "paused") {
               void audioPlayer.pause();
             }
+
+            shouldForcePlaybackResyncRef.current = false;
           } catch (error) {
             console.error("Failed to sync audio playback:", error);
             // 音频同步失败，但继续其他初始化
@@ -360,11 +439,20 @@ function SpectatorPage() {
       GameEventId.SEEK,
       (message) => {
         applyRemoteProgress(message, false);
+        const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+        if (nextPlaybackStatus) {
+          syncPlaybackStatusToRoomState(nextPlaybackStatus);
+        }
       },
     );
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
+        const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+        if (nextPlaybackStatus) {
+          syncPlaybackStatusToRoomState(nextPlaybackStatus);
+        }
+
         setAnswerOrderByUserId({});
         setCurrentAnsweringPlayer(null);
         applyRemoteProgress(message, true);
@@ -585,6 +673,11 @@ function SpectatorPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
+        const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+        if (nextPlaybackStatus) {
+          syncPlaybackStatusToRoomState(nextPlaybackStatus);
+        }
+
         applyRemoteProgress(message, true);
         await audioRef.current?.pause();
       },
@@ -715,6 +808,7 @@ function SpectatorPage() {
       GameEventId.ROUND_START,
       async (message) => {
         const roundData = message.data;
+        let startProgressMs = 0;
 
         // 1. 切换到新音频URL（如果提供）
         if (roundData.audio_url && roundData.audio_url !== currentAudioUrlRef.current) {
@@ -733,10 +827,23 @@ function SpectatorPage() {
           if (duration > 0) {
             const startMs = duration * roundData.start_percent;
             audioRef.current.progressMs = startMs;
+            startProgressMs = Math.max(0, Math.round(startMs));
           }
         } else if (audioRef.current) {
           audioRef.current.progressMs = 0;
+          startProgressMs = 0;
         }
+
+        const previousPlaybackStatus = gameStore.getState().roomState?.playback_status;
+        const nextPlaybackStatus: PlaybackState = {
+          progress_ms: startProgressMs,
+          updated_at: message.ts,
+          offset_ts: 0,
+          play_state: "playing",
+          current_order: previousPlaybackStatus?.current_order ?? 0,
+          audio_url: roundData.audio_url ?? previousPlaybackStatus?.audio_url ?? currentAudioUrlRef.current,
+        };
+        syncPlaybackStatusToRoomState(nextPlaybackStatus);
 
         resetRoundTransientState();
 
@@ -776,6 +883,7 @@ function SpectatorPage() {
     };
   }, [
     applyRemoteProgress,
+    buildPlaybackStatusFromPlayControl,
     roomId,
     resetRoundTransientState,
     setConnected,
@@ -783,6 +891,7 @@ function SpectatorPage() {
     setUrl,
     setWsClient,
     syncAnswerQueueState,
+    syncPlaybackStatusToRoomState,
   ]);
 
   useEffect(() => {

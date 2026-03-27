@@ -781,6 +781,56 @@ class audioPlayer {
     }
   }
 
+  async waitForCanPlayThrough(timeoutMs: number = 5000): Promise<boolean> {
+    if (!this.audioElement) {
+      return false;
+    }
+
+    const audio = this.audioElement;
+    if (audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
+      return true;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+
+      const cleanup = () => {
+        audio.removeEventListener("canplaythrough", onCanPlayThrough);
+        audio.removeEventListener("error", onError);
+        audio.removeEventListener("abort", onAbort);
+      };
+
+      const finalize = (result: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const onCanPlayThrough = () => {
+        finalize(true);
+      };
+
+      const onError = () => {
+        finalize(false);
+      };
+
+      const onAbort = () => {
+        finalize(false);
+      };
+
+      audio.addEventListener("canplaythrough", onCanPlayThrough, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+      audio.addEventListener("abort", onAbort, { once: true });
+
+      window.setTimeout(() => {
+        finalize(audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA);
+      }, timeoutMs);
+    });
+  }
+
   async togglePlay() {
     if (this.audioElement) {
       if (this.audioState === "running") {

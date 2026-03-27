@@ -32,6 +32,8 @@ import type {
   TagsUpdateMessage,
   TagGroupsUpdateMessage,
   TagGroupMessage,
+  ShowSongMessage,
+  PlaybackState,
 } from "../types/wsMessages";
 import {
   isPlayControlData,
@@ -255,8 +257,8 @@ function RoomPage() {
   const answerModalRef = useRef<HTMLDialogElement | null>(null);
 
   // 准备和倒计时状态
-  const [isReady, setIsReady] = useState<boolean>(false);
-  const [countdown, setCountdown] = useState<number | null>(null);
+  // const [isReady, setIsReady] = useState<boolean>(false);
+  // const [setCountdown] = useState<number | null>(null);
 
   // 房主判定：优先使用持久化身份，回退到房间实时玩家列表判定（避免本地状态缺失导致误判）
   const isOwner = useMemo(() => {
@@ -298,6 +300,7 @@ function RoomPage() {
   const [audioState, setAudioState] = useState<string>("suspended");
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
+  const shouldForcePlaybackResyncRef = useRef<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -306,7 +309,6 @@ function RoomPage() {
 
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
   const judgingDialogRef = useRef<HTMLDialogElement | null>(null);
-  const skipConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const confirmAnswerDialogRef = useRef<HTMLDialogElement | null>(null);
   const removePlayerDialogRef = useRef<HTMLDialogElement | null>(null);
   const [playerToRemove, setPlayerToRemove] = useState<number | null>(null);
@@ -382,6 +384,61 @@ function RoomPage() {
       });
     }
   }, []);
+
+  const syncPlaybackStatusToRoomState = useCallback(
+    (nextPlaybackStatus: PlaybackState) => {
+      const latestRoomState = gameStore.getState().roomState;
+      if (!latestRoomState) {
+        return;
+      }
+
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        playback_status: nextPlaybackStatus,
+        playProgress: nextPlaybackStatus.progress_ms,
+      });
+    },
+    [],
+  );
+
+  const buildPlaybackStatusFromPlayControl = useCallback(
+    (message: PlayControlMessage): PlaybackState | null => {
+      if (!isPlayControlData(message?.data)) {
+        return null;
+      }
+
+      const latestRoomState = gameStore.getState().roomState;
+      const previousPlaybackStatus = latestRoomState?.playback_status;
+
+      let playState: PlaybackState["play_state"];
+      if (message.event === GameEventId.PLAY) {
+        playState = "playing";
+      } else if (message.event === GameEventId.PAUSE) {
+        playState = "paused";
+      } else {
+        playState = previousPlaybackStatus?.play_state ?? "paused";
+      }
+
+      const audioUrl =
+        message.data.audio_url ??
+        previousPlaybackStatus?.audio_url ??
+        currentAudioUrlRef.current ??
+        null;
+
+      return {
+        progress_ms: Math.max(0, message.data.progress_ms),
+        updated_at: message.ts,
+        offset_ts:
+          typeof message.data.offset_ts === "number"
+            ? Math.max(0, message.data.offset_ts)
+            : message.ts,
+        play_state: playState,
+        current_order: previousPlaybackStatus?.current_order ?? 0,
+        audio_url: audioUrl,
+      };
+    },
+    [],
+  );
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -540,22 +597,22 @@ function RoomPage() {
     setIsAnswerModalMinimized(!isAnswerModalMinimized);
   }, [isAnswerModalMinimized]);
 
-  const handleReady = useCallback(() => {
-    if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
-      return;
-    }
+  // const handleReady = useCallback(() => {
+  //   if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
+  //     return;
+  //   }
 
-    const payload = {
-      event: GameEventId.PLAYER_READY,
-      ts: Math.round(getCalibratedNow()),
-      data: {
-        user_id: userId,
-        ready: !isReady,
-      },
-    };
+  //   const payload = {
+  //     event: GameEventId.PLAYER_READY,
+  //     ts: Math.round(getCalibratedNow()),
+  //     data: {
+  //       user_id: userId,
+  //       ready: !isReady,
+  //     },
+  //   };
 
-    void wsRef.current.sendJson(payload);
-  }, [isConnected, getCalibratedNow, userId, isReady]);
+  //   void wsRef.current.sendJson(payload);
+  // }, [isConnected, getCalibratedNow, userId, isReady]);
 
   const handleRemovePlayer = useCallback(
     (playerId: number) => {
@@ -700,7 +757,20 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
-    skipConfirmDialogRef.current?.close();
+  }, [getCalibratedNow, isOwner]);
+
+  const handleShowSong = useCallback(() => {
+    if (!wsRef.current?.isConnected() || !isOwner) {
+      return;
+    }
+
+    const payload = {
+      event: GameEventId.SHOW_SONG,
+      ts: Math.round(getCalibratedNow()),
+      data: {},
+    };
+
+    void wsRef.current.sendJson(payload);
   }, [getCalibratedNow, isOwner]);
 
   const resetRoundTransientState = useCallback(() => {
@@ -839,6 +909,12 @@ function RoomPage() {
   }, [isOwner]);
 
   useEffect(() => {
+    if (!isConnected) {
+      shouldForcePlaybackResyncRef.current = true;
+    }
+  }, [isConnected]);
+
+  useEffect(() => {
     sendPlaybackControlRef.current = sendPlaybackControl;
   }, [sendPlaybackControl]);
 
@@ -956,6 +1032,8 @@ function RoomPage() {
         // 同步音频播放器状态
         const playbackStatus = payload.playback_status;
         const audioPlayer = audioRef.current;
+        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
+        let didLoadOrRebindAudio = false;
 
         if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
           try {
@@ -973,13 +1051,20 @@ function RoomPage() {
             }
 
             // 2. 切换音频URL（自动重试3次）
-            if (newAudioUrl !== currentAudioUrlRef.current) {
+            if (
+              shouldForcePlaybackResync ||
+              newAudioUrl !== currentAudioUrlRef.current
+            ) {
               logAudioTrigger("ROOM_STATE", newAudioUrl);
               const switchSuccess = await tryPlayUrlWithRetry(newAudioUrl, 3);
               if (!switchSuccess) {
                 // reportAudioError 已在 tryPlayUrlWithRetry 内部调用
                 return; // 停止本次同步
               }
+
+              currentAudioUrlRef.current = newAudioUrl;
+              setCurrentAudioUrl(newAudioUrl);
+              didLoadOrRebindAudio = true;
             }
 
             // 3. 同步进度和播放状态（仅在URL成功切换/未变化后）
@@ -998,12 +1083,20 @@ function RoomPage() {
 
             applyRemoteProgress(pseudoMessage, true);
 
+            // 二次校准：等待 canplaythrough 后再按最新时钟偏移重新对齐
+            if (didLoadOrRebindAudio) {
+              await audioPlayer.waitForCanPlayThrough();
+              applyRemoteProgress(pseudoMessage, true);
+            }
+
             // 4. 同步播放状态
             if (playbackStatus.play_state === "playing") {
               await audioPlayer.resume();
             } else if (playbackStatus.play_state === "paused") {
               await audioPlayer.pause();
             }
+
+            shouldForcePlaybackResyncRef.current = false;
           } catch (error) {
             console.error(
               "[ROOM_STATE_SYNC] Failed to sync audio playback:",
@@ -1069,12 +1162,21 @@ function RoomPage() {
       GameEventId.SEEK,
       (message) => {
         applyRemoteProgress(message, false);
+        const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+        if (nextPlaybackStatus) {
+          syncPlaybackStatusToRoomState(nextPlaybackStatus);
+        }
       },
     );
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
         try {
+          const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+          if (nextPlaybackStatus) {
+            syncPlaybackStatusToRoomState(nextPlaybackStatus);
+          }
+
           // 1. 先同步进度（失败则不改变播放状态）
           applyRemoteProgress(message, true);
 
@@ -1304,10 +1406,27 @@ function RoomPage() {
         gameStore.getState().setScores(message.data.scores);
       }
     });
+    wsRef.current.onJsonEvent<ShowSongMessage>(
+      GameEventId.SHOW_SONG,
+      (message) => {
+        setCurrentSong({
+          title: message.data?.title ?? "",
+          artist: message.data?.author ?? "",
+          album: message.data?.album ?? "",
+          coverUrl: message.data?.cover ?? "",
+        });
+      },
+    );
+
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
         try {
+          const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+          if (nextPlaybackStatus) {
+            syncPlaybackStatusToRoomState(nextPlaybackStatus);
+          }
+
           // 1. 先同步进度（失败则不改变播放状态）
           applyRemoteProgress(message, true);
 
@@ -1520,8 +1639,8 @@ function RoomPage() {
           statusCode: 1,
         });
       }
-      setCountdown(null);
-      setIsReady(false);
+      // setCountdown(null);
+      // setIsReady(false);
     });
 
     // 处理玩家准备事件
@@ -1533,9 +1652,9 @@ function RoomPage() {
         ready: boolean;
       };
     }>(GameEventId.PLAYER_READY, (message) => {
-      const { user_id, ready } = message.data;
+      const { user_id } = message.data;
       if (user_id === userIdRef.current) {
-        setIsReady(ready);
+        // setIsReady(ready);
       }
     });
 
@@ -1547,6 +1666,7 @@ function RoomPage() {
           return;
         }
         const roundData = message.data;
+        let startProgressMs = 0;
 
         // 1. 切换到新音频URL（如果提供）
         if (
@@ -1569,11 +1689,27 @@ function RoomPage() {
           const duration = audioRef.current.durationMs;
           if (duration > 0) {
             const startMs = duration * roundData.start_percent;
-            audioRef.current.progressMs = startMs;
+            startProgressMs = Math.max(0, Math.round(startMs));
           }
         } else if (audioRef.current) {
           audioRef.current.progressMs = 0;
+          startProgressMs = 0;
         }
+
+        if (audioRef.current) {
+          audioRef.current.progressMs = startProgressMs;
+        }
+
+        const previousPlaybackStatus = gameStore.getState().roomState?.playback_status;
+        const nextPlaybackStatus: PlaybackState = {
+          progress_ms: startProgressMs,
+          updated_at: message.ts,
+          offset_ts: message.ts,
+          play_state: "playing",
+          current_order: previousPlaybackStatus?.current_order ?? 0,
+          audio_url: roundData.audio_url ?? previousPlaybackStatus?.audio_url ?? currentAudioUrlRef.current,
+        };
+        syncPlaybackStatusToRoomState(nextPlaybackStatus);
 
         // 3. 回合开始后自动恢复播放
         if (audioRef.current) {
@@ -1833,6 +1969,8 @@ function RoomPage() {
   }, [
     addAttemptOrder,
     applyRemoteProgress,
+    buildPlaybackStatusFromPlayControl,
+    getCalibratedNow,
     reportAudioError,
     tryPlayUrlWithRetry,
     roomId,
@@ -1842,6 +1980,7 @@ function RoomPage() {
     setUrl,
     setWsClient,
     syncAnswerQueueState,
+    syncPlaybackStatusToRoomState,
     switchAudioSourceIfNeeded,
     notifyAudioLoadError,
     navigate,
@@ -2267,7 +2406,7 @@ function RoomPage() {
       </div>
       <div className="flex gap-2 w-full">
         <SongInfoCard
-          songInfo={isJudging ? currentSong : null}
+          songInfo={currentSong}
           isJudging={isJudging}
           compact={true}
           className="flex-1"
@@ -2315,7 +2454,7 @@ function RoomPage() {
                       handleGameStart();
                       return;
                     }
-                    skipConfirmDialogRef.current?.showModal();
+                    handleSkipRound();
                   }}
                 >
                   {roomState?.statusCode === 0 ? (
@@ -2341,6 +2480,15 @@ function RoomPage() {
                   判分
                 </button>
               </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary btn-soft"
+                disabled={isWsDisconnected}
+                onClick={handleShowSong}
+              >
+                <Icon icon="heroicons:eye" width={16} height={16} />
+                展示答案
+              </button>
               <a
                 className="btn btn-sm  btn-soft"
                 href={`/room/${roomId}/manage`}
@@ -2398,7 +2546,7 @@ function RoomPage() {
                 />
               </button>
             </div>
-            <div className="text-sm mt-2">
+            {/* <div className="text-sm mt-2">
               回合状态：
               <span
                 className={clsx("px-2 py-0.5 rounded text-xs font-medium", {
@@ -2435,7 +2583,7 @@ function RoomPage() {
                   <div className="text-2xl font-bold">{countdown}</div>
                 </div>
               )}
-            </div>
+            </div> */}
           </div>
         </div>
       </div>
@@ -2743,7 +2891,7 @@ function RoomPage() {
                   window.open(currentSong.platformUrl, "_blank");
                 }
               }}
-              className="mb-4"
+              className="my-4"
               showAlbum={true}
               showPlatformHint={true}
             />
@@ -2824,34 +2972,6 @@ function RoomPage() {
               onClick={() => confirmAnswerDialogRef.current?.showModal()}
             >
               确认答案
-            </button>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>关闭</button>
-        </form>
-      </dialog>
-
-      {/* 跳过本题确认弹窗 */}
-      <dialog ref={skipConfirmDialogRef} className="modal">
-        <div className="modal-box max-w-md">
-          <h3 className="font-bold text-lg">确认进入下一轮</h3>
-          <p className="py-4">确定立即进入下一轮吗？当前抢答队列会被清空。</p>
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => skipConfirmDialogRef.current?.close()}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-warning"
-              disabled={isWsDisconnected}
-              onClick={handleSkipRound}
-            >
-              确认下一轮
             </button>
           </div>
         </div>

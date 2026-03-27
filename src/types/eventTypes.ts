@@ -42,6 +42,7 @@ export const GameEventId = {
   SKIP_ROUND: 43,
   SHOW_ANSWER: 44,
   ROUND_STATE_UPDATE: 45,
+  SHOW_SONG: 46,
 
   TAGS_UPDATE: 60,
   TAG_GROUPS_UPDATE: 61,

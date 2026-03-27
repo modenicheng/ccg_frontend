@@ -192,6 +192,19 @@ export interface RoundStateUpdateMessage {
   data: RoundStateUpdateData;
 }
 
+export interface ShowSongData {
+  title: string | null;
+  album: string | null;
+  author: string | null;
+  cover: string | null;
+}
+
+export interface ShowSongMessage {
+  event: typeof GameEventId.SHOW_SONG;
+  ts: number;
+  data: ShowSongData;
+}
+
 // 类型守卫函数
 export function isPlayControlData(value: unknown): value is PlayControlData {
   if (!value || typeof value !== "object") {
@@ -352,6 +365,7 @@ export type WsMessage =
   | JudgingMessage
   | ScoreUpdateMessage
   | RoundStateUpdateMessage
+  | ShowSongMessage
   | StartPosUpdateMessage
   | GameOverMessage
   | ClearAnswerQueueMessage
