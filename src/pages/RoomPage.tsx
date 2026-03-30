@@ -759,6 +759,21 @@ function RoomPage() {
     void wsRef.current.sendJson(payload);
   }, [getCalibratedNow, isOwner]);
 
+  const handleEndRound = useCallback(() => {
+    if (!wsRef.current?.isConnected() || !isOwner) {
+      return;
+    }
+
+    // 发送 JUDGING 事件，触发判分流程
+    const payload = {
+      event: GameEventId.JUDGING,
+      ts: Math.round(getCalibratedNow()),
+      data: {},
+    };
+
+    void wsRef.current.sendJson(payload);
+  }, [getCalibratedNow, isOwner]);
+
   const handleShowSong = useCallback(() => {
     if (!wsRef.current?.isConnected() || !isOwner) {
       return;
@@ -2003,6 +2018,7 @@ function RoomPage() {
       if (!isOwnerRef.current || !wsRef.current?.isConnected()) {
         return;
       }
+      // 曲目播放完毕，仅暂停播放
       void sendPlaybackControlRef.current(GameEventId.PAUSE);
     };
     audioRef.current.onTimeUpdate = (ev) => {
@@ -2472,12 +2488,23 @@ function RoomPage() {
                 </button>
                 <button
                   type="button"
-                  className="btn btn-info btn-sm btn-soft join-item flex-1"
+                  className={clsx("btn btn-sm btn-soft join-item flex-1", {
+                    "btn-info": !isJudging,
+                    "btn-success": isJudging,
+                  })}
                   disabled={isWsDisconnected}
-                  onClick={() => judgingDialogRef.current?.showModal()}
+                  onClick={() => {
+                    if (isJudging) {
+                      // 判分模式下，打开判分弹窗
+                      judgingDialogRef.current?.showModal();
+                    } else {
+                      // 游戏进行中，强制结束回合进入判分
+                      handleEndRound();
+                    }
+                  }}
                 >
                   <Icon icon="heroicons:scale" width={16} height={16} />
-                  判分
+                  {isJudging ? "判分" : "结束回合"}
                 </button>
               </div>
               <button
