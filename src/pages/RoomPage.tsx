@@ -494,17 +494,24 @@ function RoomPage() {
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           await audioRef.current?.playUrlAsStream(url, false);
-          console.log(`[TRY_PLAY_URL] Successfully loaded audio on attempt ${attempt + 1}`);
-          return true;
+          console.log(`[TRY_PLAY_URL] Successfully loaded audio on attempt ${attempt + 1}, waiting for canplaythrough...`);
+          // 等待音频加载完成（最多等待 8 秒）
+          const loaded = await audioRef.current?.waitForCanPlayThrough(8000);
+          console.log(`[TRY_PLAY_URL] waitForCanPlayThrough result:`, loaded);
+          if (loaded) {
+            return true;
+          }
+          console.warn(`[TRY_PLAY_URL] Audio not ready after canplaythrough check, attempt ${attempt + 1}/${maxRetries}`);
         } catch (err) {
           console.error(
             `[TRY_PLAY_URL] Attempt ${attempt + 1}/${maxRetries} failed:`,
             (err as Error).message,
           );
-          // 若不是最后一次尝试，等待500ms后重试
-          if (attempt < maxRetries - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
+        }
+        // 若不是最后一次尝试，等待1秒后重试
+        if (attempt < maxRetries - 1) {
+          console.log(`[TRY_PLAY_URL] Retrying in 1 second...`);
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
 
@@ -1230,32 +1237,38 @@ function RoomPage() {
           const audioUrl = message.data.audio_url;
           console.log("[PLAY_EVENT] Target audio URL:", audioUrl);
 
-          // 1. 检查 audioElement 是否已初始化
+          // 1. 检查 audioElement 是否已初始化并加载正确的 URL
           if (audioRef.current && audioUrl) {
             const hasAudioElement = audioRef.current.hasAudioElement?.();
             console.log("[PLAY_EVENT] Has audio element:", hasAudioElement);
             
             if (!hasAudioElement) {
-              // 还没有加载音频，先调用 playUrlAsStream
+              // 还没有加载音频，先调用 playUrlAsStream 并等待加载完成
               console.log("[PLAY_EVENT] Audio element not initialized, calling playUrlAsStream...");
-              try {
-                await audioRef.current.playUrlAsStream(audioUrl, false);
-                console.log("[PLAY_EVENT] playUrlAsStream completed, now resuming...");
-              } catch (loadError) {
-                console.error("[PLAY_EVENT] Failed to load audio:", loadError);
-                // 加载失败，继续尝试 resume（可能已经加载过）
+              await audioRef.current.playUrlAsStream(audioUrl, false);
+              console.log("[PLAY_EVENT] playUrlAsStream completed, waiting for canplaythrough...");
+              // 等待音频加载完成（最多等待 8 秒）
+              const loaded = await audioRef.current.waitForCanPlayThrough(8000);
+              console.log("[PLAY_EVENT] waitForCanPlayThrough result:", loaded);
+              if (!loaded) {
+                console.warn("[PLAY_EVENT] Audio loading timeout, but will try to resume anyway");
               }
             } else {
               // 已加载，检查是否需要重新加载不同 URL
               const currentUrl = audioRef.current.getCurrentUrl?.();
+              console.log("[PLAY_EVENT] Current URL:", currentUrl, "Target URL:", audioUrl);
               if (currentUrl !== audioUrl) {
                 console.log("[PLAY_EVENT] URL changed, reloading audio...");
-                try {
-                  await audioRef.current.playUrlAsStream(audioUrl, false);
-                  console.log("[PLAY_EVENT] playUrlAsStream completed (URL changed), now resuming...");
-                } catch (loadError) {
-                  console.error("[PLAY_EVENT] Failed to reload audio:", loadError);
+                await audioRef.current.playUrlAsStream(audioUrl, false);
+                console.log("[PLAY_EVENT] playUrlAsStream completed (URL changed), waiting for canplaythrough...");
+                // 等待音频加载完成（最多等待 8 秒）
+                const loaded = await audioRef.current.waitForCanPlayThrough(8000);
+                console.log("[PLAY_EVENT] waitForCanPlayThrough result after URL change:", loaded);
+                if (!loaded) {
+                  console.warn("[PLAY_EVENT] Audio loading timeout after URL change, but will try to resume anyway");
                 }
+              } else {
+                console.log("[PLAY_EVENT] URL matches, no need to reload");
               }
             }
           }
