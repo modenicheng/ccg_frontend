@@ -236,6 +236,9 @@ function RoomPage() {
     Array<{ id: number; username: string; description: string }>
   >([]);
 
+  // 窗口 focus 状态 - 用于控制音频音量（每个客户端独立处理）
+  const [isWindowFocused, setIsWindowFocused] = useState<boolean>(true);
+
   // 玩家作答情况状态
   const [playerAnswers, setPlayerAnswers] = useState<
     Array<{
@@ -328,6 +331,35 @@ function RoomPage() {
   const roomIdCopyTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
   const isWsDisconnected = !isConnected;
+
+  // 窗口 focus 检测 - 用于控制音频音量（每个客户端独立处理）
+  useEffect(() => {
+    const handleFocus = () => {
+      setIsWindowFocused(true);
+      console.log("[WINDOW] Window focused, enabling audio");
+    };
+    const handleBlur = () => {
+      setIsWindowFocused(false);
+      console.log("[WINDOW] Window blurred, muting audio");
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
+
+    // 也监听 visibilitychange（处理标签页切换）
+    const handleVisibilityChange = () => {
+      const focused = !document.hidden;
+      setIsWindowFocused(focused);
+      console.log("[WINDOW] Visibility changed, focused:", focused);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   const notifyAudioLoadError = useCallback((message: string) => {
     pushToast({ message, variant: "error" });
@@ -1186,23 +1218,63 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
+        console.log("[PLAY_EVENT] Received PLAY event:", message);
         try {
           const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
+          console.log("[PLAY_EVENT] Built playback status:", nextPlaybackStatus);
           if (nextPlaybackStatus) {
             syncPlaybackStatusToRoomState(nextPlaybackStatus);
+            console.log("[PLAY_EVENT] Synced playback status to room state");
           }
 
-          // 1. 先同步进度（失败则不改变播放状态）
+          const audioUrl = message.data.audio_url;
+          console.log("[PLAY_EVENT] Target audio URL:", audioUrl);
+
+          // 1. 检查 audioElement 是否已初始化
+          if (audioRef.current && audioUrl) {
+            const hasAudioElement = audioRef.current.hasAudioElement?.();
+            console.log("[PLAY_EVENT] Has audio element:", hasAudioElement);
+            
+            if (!hasAudioElement) {
+              // 还没有加载音频，先调用 playUrlAsStream
+              console.log("[PLAY_EVENT] Audio element not initialized, calling playUrlAsStream...");
+              try {
+                await audioRef.current.playUrlAsStream(audioUrl, false);
+                console.log("[PLAY_EVENT] playUrlAsStream completed, now resuming...");
+              } catch (loadError) {
+                console.error("[PLAY_EVENT] Failed to load audio:", loadError);
+                // 加载失败，继续尝试 resume（可能已经加载过）
+              }
+            } else {
+              // 已加载，检查是否需要重新加载不同 URL
+              const currentUrl = audioRef.current.getCurrentUrl?.();
+              if (currentUrl !== audioUrl) {
+                console.log("[PLAY_EVENT] URL changed, reloading audio...");
+                try {
+                  await audioRef.current.playUrlAsStream(audioUrl, false);
+                  console.log("[PLAY_EVENT] playUrlAsStream completed (URL changed), now resuming...");
+                } catch (loadError) {
+                  console.error("[PLAY_EVENT] Failed to reload audio:", loadError);
+                }
+              }
+            }
+          }
+
+          // 2. 先同步进度（失败则不改变播放状态）
+          console.log("[PLAY_EVENT] Applying remote progress...");
           applyRemoteProgress(message, true);
 
-          // 2. 同步播放状态（仅在进度同步成功后）
+          // 3. 同步播放状态（仅在进度同步成功后）
+          console.log("[PLAY_EVENT] Resuming audio...");
           await audioRef.current?.resume();
+          console.log("[PLAY_EVENT] Audio resumed successfully");
           
-          // 3. 清理UI状态
+          // 4. 清理 UI 状态
           setAnswerOrderByUserId({});
           setCurrentAnsweringPlayer(null);
           setIsJudging(false);
           setCurrentSong(null);
+          console.log("[PLAY_EVENT] PLAY event processed successfully");
         } catch (err) {
           console.error("[PLAY_EVENT] Failed to apply PLAY event:", err);
           await reportAudioError(
@@ -1840,19 +1912,30 @@ function RoomPage() {
     wsRef.current.onJsonEvent<PreloadAudioMessage>(
       GameEventId.PRELOAD_AUDIO,
       async (message) => {
+        console.log("[PRELOAD_AUDIO] Received PRELOAD_AUDIO event:", message);
         if (isDisposed) {
+          console.log("[PRELOAD_AUDIO] Skip: isDisposed");
           return;
         }
         const { audio_url } = message.data;
         if (!audio_url) {
+          console.log("[PRELOAD_AUDIO] Skip: no audio_url");
           return;
         }
 
         const now = Date.now();
         const lastPreloadTs = recentPreloadByUrlRef.current[audio_url] ?? 0;
         if (now - lastPreloadTs < PRELOAD_DEDUP_WINDOW_MS) {
+          console.log("[PRELOAD_AUDIO] Dedup skip, last preload:", lastPreloadTs);
           return;
         }
+
+        console.log("[PRELOAD_AUDIO] Checking conditions:", {
+          audioRefReady: !!audioRef.current,
+          currentUrl: currentAudioUrlRef.current,
+          switchingUrl: switchingAudioUrlRef.current,
+          targetUrl: audio_url,
+        });
 
         if (
           audioRef.current &&
@@ -1862,14 +1945,17 @@ function RoomPage() {
           try {
             logAudioTrigger("PRELOAD", audio_url);
             recentPreloadByUrlRef.current[audio_url] = now;
+            console.log("[PRELOAD_AUDIO] Starting preload for URL:", audio_url);
             await audioRef.current.preload(audio_url);
-            console.log(`Audio preloaded: ${audio_url}`);
+            console.log("[PRELOAD_AUDIO] Successfully preloaded:", audio_url);
           } catch (error) {
-            console.error("Failed to preload audio:", error);
+            console.error("[PRELOAD_AUDIO] Failed to preload:", error);
             notifyAudioLoadError(
               parseErrorMessage(error, "音频预加载失败，请稍后重试"),
             );
           }
+        } else {
+          console.log("[PRELOAD_AUDIO] Skip preload, audioRef:", !!audioRef.current, "currentUrl:", currentAudioUrlRef.current);
         }
       },
     );
@@ -2079,6 +2165,18 @@ function RoomPage() {
       audioRef.current.volume = localVolume;
     }
   }, [localVolume]);
+
+  // 根据窗口 focus 状态动态调整音量（每个客户端独立处理）
+  useEffect(() => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    // 窗口失焦时静音，聚焦时恢复用户设定的音量
+    const targetVolume = isWindowFocused ? localVolume : 0;
+    audioRef.current.volume = targetVolume;
+    console.log("[WINDOW] Volume adjusted:", targetVolume, "(focused:", isWindowFocused, ")");
+  }, [isWindowFocused, localVolume]);
 
   useEffect(() => {
     const parent = canvasParentRef.current;

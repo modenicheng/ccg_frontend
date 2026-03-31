@@ -216,6 +216,11 @@ const RoomManagePage = () => {
   // 添加单曲到房间
   const [addSingleSongId, setAddSingleSongId] = useState<number | null>(null);
   const [isAddingSingleSong, setIsAddingSingleSong] = useState(false);
+  // 设置预热 BGM - 统一使用数据库 song_id
+  const [testAudioSongId, setTestAudioSongId] = useState<number | null>(null); // 数据库歌曲 ID
+  const [initialTestAudioSongId, setInitialTestAudioSongId] = useState<number | null>(null); // 保存按钮变更判断
+  const [isSettingTestAudio, setIsSettingTestAudio] = useState(false);
+  const [testAudioSearchKw, setTestAudioSearchKw] = useState<string>("");
 
   // 房间歌曲状态
   const [roomSongs, setRoomSongs] = useState<RoomSong[]>([]);
@@ -568,8 +573,9 @@ const RoomManagePage = () => {
     const selectedChanged =
       [...selectedTagGroupIds].sort((a, b) => a - b).join(",") !==
       [...initialSelectedIds].sort((a, b) => a - b).join(",");
-    return titleChanged || selectedChanged;
-  }, [initialSelectedIds, initialTitle, selectedTagGroupIds, title]);
+    const testAudioChanged = testAudioSongId !== initialTestAudioSongId;
+    return titleChanged || selectedChanged || testAudioChanged;
+  }, [initialSelectedIds, initialTestAudioSongId, initialTitle, selectedTagGroupIds, testAudioSongId, title]);
 
   const toggleTagGroup = (id: number) => {
     setSelectedTagGroupIds((prev) =>
@@ -944,6 +950,29 @@ const RoomManagePage = () => {
 
       setInitialTitle(room.title ?? "");
       setInitialSelectedIds(selectedTagGroupIds);
+
+      // 如果 test_audio 已更改，调用 HTTP 端点设置（触发预下载和播放）
+      if (testAudioSongId !== initialTestAudioSongId && testAudioSongId !== null) {
+        try {
+          const response = await fetch(`/api/room/${roomid}/set-test-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ song_id: testAudioSongId }),
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            console.log("Test audio updated via set-test-audio endpoint:", result);
+            setInitialTestAudioSongId(testAudioSongId);
+          } else {
+            const errorText = await response.text();
+            console.error("Failed to set test audio:", errorText);
+          }
+        } catch (error) {
+          console.error("Error setting test audio:", error);
+        }
+      }
+
       setSuccess("房间设置已保存");
     } catch (error) {
       setError((error as Error).message || "保存设置失败");
@@ -1183,7 +1212,7 @@ const RoomManagePage = () => {
     setSongManageError(null);
     setSongManageSuccess(null);
     try {
-      // 使用新的room_songs API添加歌曲到房间
+      // 使用新的 room_songs API 添加歌曲到房间
       await addSongsToRoom(roomid, {
         song_ids: [addSingleSongId],
         append_to_end: true,
@@ -1197,6 +1226,44 @@ const RoomManagePage = () => {
       setSongManageError((err as Error).message || "添加单曲到房间失败");
     } finally {
       setIsAddingSingleSong(false);
+    }
+  };
+
+  const handleSetTestAudio = async (songDbId: number) => {
+    if (!roomid) return;
+    
+    // 从房间歌曲列表中查找对应的歌曲信息
+    const targetSong = roomSongs.find(
+      (rs) => rs.song_id === songDbId
+    );
+    
+    if (!targetSong) {
+      setSongManageError("歌曲不在房间歌单中，请先添加歌曲到房间");
+      return;
+    }
+    
+    setIsSettingTestAudio(false);
+    
+    try {
+      // 调用 HTTP 端点设置 test_audio（触发预下载和播放）
+      const response = await fetch(`/api/room/${roomid}/set-test-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song_id: songDbId }),
+      });
+      
+      if (response.ok) {
+        const result = await response.json();
+        setTestAudioSongId(songDbId);
+        setSongManageSuccess(`已设置预热 BGM：${result.title || targetSong.song?.title || '歌曲'} (ID: ${songDbId})`);
+        console.log("Test audio set:", result);
+      } else {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to set test audio');
+      }
+    } catch (error) {
+      setSongManageError((error as Error).message || "设置预热 BGM 失败");
+      console.error("handleSetTestAudio failed:", error);
     }
   };
 
@@ -1647,6 +1714,21 @@ const RoomManagePage = () => {
                   >
                     <Icon icon="mdi:music" className="text-lg" />
                     添加单曲到房间
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-accent btn-sm"
+                    onClick={() => {
+                      setIsSettingTestAudio(true);
+                    }}
+                  >
+                    <Icon icon="mdi:volume-high" className="text-lg" />
+                    设置预热 BGM
+                    {testAudioSongId && (
+                      <span className="ml-1 text-xs opacity-70">
+                        (当前：ID {testAudioSongId})
+                      </span>
+                    )}
                   </button>
                 </div>
               </div>
@@ -2791,6 +2873,95 @@ const RoomManagePage = () => {
         </form>
       </dialog>
 
+      {/* 设置预热 BGM - 歌曲选择对话框 */}
+      {isSettingTestAudio && (
+        <div className="modal modal-open">
+          <div className="modal-box max-w-3xl">
+            <h3 className="font-bold text-lg">设置预热背景音乐</h3>
+            <p className="py-2">
+              从已导入的歌曲中选择一首作为房间等待时的预热 BGM
+            </p>
+            
+            {/* 搜索框 */}
+            <div className="py-4">
+              <input
+                type="text"
+                placeholder="搜索歌曲..."
+                className="input input-bordered w-full mb-4"
+                value={testAudioSearchKw}
+                onChange={(e) => setTestAudioSearchKw(e.target.value)}
+              />
+              
+              {/* 歌曲列表 */}
+              <div className="overflow-y-auto max-h-96">
+                <table className="table table-zebra w-full">
+                  <thead>
+                    <tr>
+                      <th>歌曲</th>
+                      <th>歌手</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roomSongs
+                      .filter((song) => {
+                        if (!testAudioSearchKw) return true;
+                        const kw = testAudioSearchKw.toLowerCase();
+                        return (
+                          song.song?.title?.toLowerCase().includes(kw) ||
+                          song.song?.artist?.toLowerCase().includes(kw)
+                        );
+                      })
+                      .map((roomSong) => (
+                        <tr key={roomSong.song_id}>
+                          <td>{roomSong.song?.title || '未知歌曲'}</td>
+                          <td>{roomSong.song?.artist || '未知歌手'}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-xs btn-accent"
+                              onClick={() => {
+                                handleSetTestAudio(roomSong.song_id);
+                              }}
+                            >
+                              设为 BGM
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+                {roomSongs.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-8 text-base-content/50">
+                    <Icon icon="heroicons:music-note" width="24" height="24" />
+                    <p className="mt-2 text-sm">房间中没有歌曲</p>
+                    <p className="text-xs mt-1">请先添加歌曲到房间</p>
+                  </div>
+                )}
+              </div>
+              
+              <p className="text-xs opacity-70 mt-4">
+                默认 BGM：001gQVVQ0WD3Al
+                <br />
+                房间创建后会自动循环播放这首歌曲（仅当窗口激活时）
+              </p>
+            </div>
+            
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setIsSettingTestAudio(false)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button>close</button>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

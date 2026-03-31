@@ -191,6 +191,7 @@ class WS {
         }
 
         if (messageEvent !== undefined) {
+          console.log(`[WS_CLIENT] Dispatching event ${messageEvent}:`, message);
           const eventHandler = this.jsonEventHandlers.get(messageEvent);
           if (eventHandler) {
             if (typeof eventHandler === "function") {
@@ -200,6 +201,8 @@ class WS {
                 `Handler for JSON event ${messageEvent} is not a function`,
               );
             }
+          } else {
+            console.log(`[WS_CLIENT] No handler registered for event ${messageEvent}`);
           }
         }
       }
