@@ -573,7 +573,7 @@ class audioPlayer {
         return; // 已加载成功
       }
       if (entry.error) {
-        console.log(`[PRELOAD] Previous error found for URL: ${url}, retrying...`);
+        console.log(`[PRELOAD] Previous error found for URL: ${url}, clearing and retrying...`);
         // 清除错误，重试
         delete this.preloadTable[url];
       }
@@ -590,11 +590,11 @@ class audioPlayer {
     return new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         audio.pause();
-        const err = new Error(`Preload timeout (30s) for URL: ${url}`);
-        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: (this.preloadTable[url]?.retryCount || 0) + 1 };
+        const err = new Error(`Preload timeout (15s) for URL: ${url}`);
+        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: 0 };
         console.error(`[PRELOAD] Timeout for URL: ${url}`);
         reject(err);
-      }, 30000); // 30 秒超时
+      }, 15000); // 15 秒超时
 
       audio.oncanplaythrough = () => {
         clearTimeout(timeout);
@@ -606,22 +606,11 @@ class audioPlayer {
       audio.onerror = (e) => {
         clearTimeout(timeout);
         const err = new Error(`Failed to preload audio: ${url}`);
-        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: (this.preloadTable[url]?.retryCount || 0) + 1 };
+        this.preloadTable[url] = { audio, loaded: false, error: err, retryCount: 0 };
         console.error(`[PRELOAD] Error for URL: ${url}`, e);
         
-        // 如果是网络错误（可能是后端还在下载），延迟重试
-        // MEDIA_ERR_NETWORK = 2, MEDIA_ERR_SRC_NOT_SUPPORTED = 4
-        const errorCode = audio.error?.code;
-        if (errorCode === 2 || errorCode === 4) {
-          console.log(`[PRELOAD] Audio not ready (error code ${errorCode}, possibly downloading), will retry...`);
-          // 不立即 reject，等待一段时间后再试
-          setTimeout(() => {
-            console.log(`[PRELOAD] Retrying preload for URL: ${url}`);
-            audio.load(); // 重新加载
-          }, 2000);
-          return; // 不 reject，等待重试
-        }
-        
+        // 直接 reject，不重试
+        // 让调用者决定是否重试（例如 tryPlayUrlWithRetry）
         reject(err);
       };
 
@@ -668,41 +657,75 @@ class audioPlayer {
     url: string,
     playByDefault: boolean = false,
   ): Promise<void> {
-    // 1. 完全停止并丢弃旧的音频元素和源节点
-    this.cleanupCurrentSource();
-
-    let audio;
-
+    // 检查是否已预加载
     const preloadedEntry = this.preloadTable[url];
     if (preloadedEntry?.loaded) {
       console.log(`[PLAY_URL] Using preloaded audio for URL: ${url}`);
-      audio = preloadedEntry.audio;
-      // 确保音频元素属性正确
-      audio.crossOrigin = "anonymous";
-      audio.preload = "auto";
-      audio.loop = false;
-      audio.currentTime = 0;
-    } else {
-      console.log(
-        `[PLAY_URL] No successfully preloaded audio found for URL: ${url}, creating new audio element.`,
-      );
+      return this.usePreloadedAudio(url, playByDefault);
+    }
+    
+    console.log(
+      `[PLAY_URL] No successfully preloaded audio found for URL: ${url}, creating new audio element.`,
+    );
 
-      // 2. 创建全新的 audio 元素
-      audio = new Audio();
-      audio.crossOrigin = "anonymous";
-      audio.preload = "auto";
-      audio.src = url;
-      audio.loop = false;
-      // 存储预加载引用供下次使用
-      this.preloadTable[url] = { audio, loaded: false, error: undefined, retryCount: 0 };
+    // 1. 完全停止并丢弃旧的音频元素和源节点
+    this.cleanupCurrentSource();
+
+    // 2. 创建全新的 audio 元素
+    const audio = new Audio();
+    audio.crossOrigin = "anonymous";
+    audio.preload = "auto";
+    audio.src = url;
+    audio.loop = false;
+    // 存储预加载引用供下次使用
+    this.preloadTable[url] = { audio, loaded: false, error: undefined, retryCount: 0 };
+
+    await this.setupAudioElement(audio, url, playByDefault);
+  }
+
+  /**
+   * 使用已预加载的音频
+   */
+  async usePreloadedAudio(
+    url: string,
+    playByDefault: boolean = false,
+  ): Promise<void> {
+    const preloadedEntry = this.preloadTable[url];
+    if (!preloadedEntry?.loaded) {
+      throw new Error(`Audio not preloaded for URL: ${url}`);
     }
 
+    console.log(`[USE_PRELOADED] Switching to preloaded audio for URL: ${url}`);
+    
+    // 1. 完全停止并丢弃旧的音频元素和源节点
+    this.cleanupCurrentSource();
+
+    // 2. 使用预加载的 audio 元素
+    const audio = preloadedEntry.audio;
+    // 确保音频元素属性正确
+    audio.crossOrigin = "anonymous";
+    audio.preload = "auto";
+    audio.loop = false;
+    audio.currentTime = 0;
+
+    await this.setupAudioElement(audio, url, playByDefault);
+  }
+
+  /**
+   * 设置音频元素（公共逻辑）
+   */
+  private async setupAudioElement(
+    audio: HTMLAudioElement,
+    url: string,
+    playByDefault: boolean,
+  ): Promise<void> {
     audio.ontimeupdate = this.timeUpdateCallback;
+    
     // 3. 创建新的源节点
     try {
       this.sourceNode = this.audioCtx.createMediaElementSource(audio);
     } catch (e) {
-      console.error("[PLAY_URL] Failed to create media element source (should not happen with fresh audio element):", e);
+      console.error("[SETUP_AUDIO] Failed to create media element source:", e);
       throw e;
     }
 

@@ -336,11 +336,9 @@ function RoomPage() {
   useEffect(() => {
     const handleFocus = () => {
       setIsWindowFocused(true);
-      console.log("[WINDOW] Window focused, enabling audio");
     };
     const handleBlur = () => {
       setIsWindowFocused(false);
-      console.log("[WINDOW] Window blurred, muting audio");
     };
 
     window.addEventListener('focus', handleFocus);
@@ -350,7 +348,6 @@ function RoomPage() {
     const handleVisibilityChange = () => {
       const focused = !document.hidden;
       setIsWindowFocused(focused);
-      console.log("[WINDOW] Visibility changed, focused:", focused);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -487,16 +484,16 @@ function RoomPage() {
 
   /**
    * 尝试使用重试机制加载音频流
-   * 失败3次后自动向后端报告错误
+   * 失败 2 次后自动向后端报告错误
    */
   const tryPlayUrlWithRetry = useCallback(
-    async (url: string, maxRetries: number = 3): Promise<boolean> => {
+    async (url: string, maxRetries: number = 2): Promise<boolean> => {
       for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
           await audioRef.current?.playUrlAsStream(url, false);
           console.log(`[TRY_PLAY_URL] Successfully loaded audio on attempt ${attempt + 1}, waiting for canplaythrough...`);
-          // 等待音频加载完成（最多等待 8 秒）
-          const loaded = await audioRef.current?.waitForCanPlayThrough(8000);
+          // 等待音频加载完成（最多等待 5 秒）
+          const loaded = await audioRef.current?.waitForCanPlayThrough(5000);
           console.log(`[TRY_PLAY_URL] waitForCanPlayThrough result:`, loaded);
           if (loaded) {
             return true;
@@ -508,10 +505,10 @@ function RoomPage() {
             (err as Error).message,
           );
         }
-        // 若不是最后一次尝试，等待1秒后重试
+        // 若不是最后一次尝试，等待 500ms 后重试
         if (attempt < maxRetries - 1) {
-          console.log(`[TRY_PLAY_URL] Retrying in 1 second...`);
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          console.log(`[TRY_PLAY_URL] Retrying in 500ms...`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
       }
 
@@ -1240,36 +1237,50 @@ function RoomPage() {
           // 1. 检查 audioElement 是否已初始化并加载正确的 URL
           if (audioRef.current && audioUrl) {
             const hasAudioElement = audioRef.current.hasAudioElement?.();
-            console.log("[PLAY_EVENT] Has audio element:", hasAudioElement);
+            const currentUrl = audioRef.current.getCurrentUrl?.();
+            const isPreloaded = audioRef.current.isPreloaded?.(audioUrl);
             
+            console.log("[PLAY_EVENT] Audio state check:", {
+              hasAudioElement,
+              currentUrl,
+              targetUrl: audioUrl,
+              isPreloaded,
+              urlMatches: currentUrl === audioUrl,
+            });
+            
+            // 只有在以下情况才需要加载音频：
+            // 1. 还没有 audio element
+            // 2. 当前 URL 与目标 URL 不同且未预加载
             if (!hasAudioElement) {
-              // 还没有加载音频，先调用 playUrlAsStream 并等待加载完成
+              // 还没有加载音频
               console.log("[PLAY_EVENT] Audio element not initialized, calling playUrlAsStream...");
               await audioRef.current.playUrlAsStream(audioUrl, false);
               console.log("[PLAY_EVENT] playUrlAsStream completed, waiting for canplaythrough...");
-              // 等待音频加载完成（最多等待 8 秒）
-              const loaded = await audioRef.current.waitForCanPlayThrough(8000);
+              // 等待音频加载完成（最多等待 5 秒）
+              const loaded = await audioRef.current.waitForCanPlayThrough(5000);
               console.log("[PLAY_EVENT] waitForCanPlayThrough result:", loaded);
               if (!loaded) {
                 console.warn("[PLAY_EVENT] Audio loading timeout, but will try to resume anyway");
               }
-            } else {
-              // 已加载，检查是否需要重新加载不同 URL
-              const currentUrl = audioRef.current.getCurrentUrl?.();
-              console.log("[PLAY_EVENT] Current URL:", currentUrl, "Target URL:", audioUrl);
-              if (currentUrl !== audioUrl) {
-                console.log("[PLAY_EVENT] URL changed, reloading audio...");
+            } else if (currentUrl !== audioUrl) {
+              if (isPreloaded) {
+                // URL 不同但已预加载，使用预加载的音频
+                console.log("[PLAY_EVENT] URL changed but audio is preloaded, switching to preloaded audio...");
+                await audioRef.current.usePreloadedAudio(audioUrl);
+              } else {
+                // URL 不同且未预加载，重新加载
+                console.log("[PLAY_EVENT] URL changed and not preloaded, reloading audio...");
                 await audioRef.current.playUrlAsStream(audioUrl, false);
                 console.log("[PLAY_EVENT] playUrlAsStream completed (URL changed), waiting for canplaythrough...");
-                // 等待音频加载完成（最多等待 8 秒）
-                const loaded = await audioRef.current.waitForCanPlayThrough(8000);
+                // 等待音频加载完成（最多等待 5 秒）
+                const loaded = await audioRef.current.waitForCanPlayThrough(5000);
                 console.log("[PLAY_EVENT] waitForCanPlayThrough result after URL change:", loaded);
                 if (!loaded) {
                   console.warn("[PLAY_EVENT] Audio loading timeout after URL change, but will try to resume anyway");
                 }
-              } else {
-                console.log("[PLAY_EVENT] URL matches, no need to reload");
               }
+            } else {
+              console.log("[PLAY_EVENT] URL matches, no need to reload");
             }
           }
 
@@ -1943,11 +1954,19 @@ function RoomPage() {
           return;
         }
 
+        // 检查是否已预加载
+        const isPreloaded = audioRef.current?.isPreloaded?.(audio_url) ?? false;
+        if (isPreloaded) {
+          console.log("[PRELOAD_AUDIO] Skip: already preloaded for URL:", audio_url);
+          return;
+        }
+
         console.log("[PRELOAD_AUDIO] Checking conditions:", {
           audioRefReady: !!audioRef.current,
           currentUrl: currentAudioUrlRef.current,
           switchingUrl: switchingAudioUrlRef.current,
           targetUrl: audio_url,
+          isPreloaded,
         });
 
         if (
@@ -2188,7 +2207,6 @@ function RoomPage() {
     // 窗口失焦时静音，聚焦时恢复用户设定的音量
     const targetVolume = isWindowFocused ? localVolume : 0;
     audioRef.current.volume = targetVolume;
-    console.log("[WINDOW] Volume adjusted:", targetVolume, "(focused:", isWindowFocused, ")");
   }, [isWindowFocused, localVolume]);
 
   useEffect(() => {
