@@ -130,6 +130,8 @@ const RoomManagePage = () => {
   const deleteSongConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const deleteSonglistConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const clearRoomSongsConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const endGameConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+  const dissolveRoomConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const [manageTags, setManageTags] = useState<Tag[]>([]);
   const [manageTagGroups, setManageTagGroups] = useState<TagGroup[]>([]);
   const [groupTagIds, setGroupTagIds] = useState<number[]>([]);
@@ -997,6 +999,58 @@ const RoomManagePage = () => {
     }
   };
 
+  const handleEndGame = async () => {
+    if (!wsClient) return;
+
+    endGameConfirmDialogRef.current?.showModal();
+  };
+
+  const handleConfirmEndGame = async () => {
+    if (!wsClient) return;
+
+    try {
+      // 发送游戏结束事件
+      await wsClient.sendJson({
+        event: GameEventId.GAME_OVER,
+        data: {
+          manual: true,
+        },
+      });
+
+      setSuccess("游戏已结束");
+      endGameConfirmDialogRef.current?.close();
+    } catch (error) {
+      setError((error as Error).message || "结束游戏失败");
+      console.error("结束游戏失败:", error);
+    }
+  };
+
+  const handleDissolveRoom = async () => {
+    if (!wsClient) return;
+
+    dissolveRoomConfirmDialogRef.current?.showModal();
+  };
+
+  const handleConfirmDissolveRoom = async () => {
+    try {
+      // 调用解散房间 API
+      await fetch(`/api/room/${encodeURIComponent(roomid)}/dissolve`, {
+        method: 'DELETE',
+      });
+
+      setSuccess("房间已解散");
+      dissolveRoomConfirmDialogRef.current?.close();
+      
+      // 延迟跳转到首页
+      setTimeout(() => {
+        navigate('/');
+      }, 1000);
+    } catch (error) {
+      setError((error as Error).message || "解散房间失败");
+      console.error("解散房间失败:", error);
+    }
+  };
+
   const handleOpenSongManageDialog = async (tab?: "songs" | "songlists") => {
     const activeTab = tab ?? songManageTab;
     if (tab) {
@@ -1743,6 +1797,12 @@ const RoomManagePage = () => {
                 </button>
                 <button className="btn btn-success" onClick={handleStartGame}>
                   开始游戏
+                </button>
+                <button className="btn btn-warning" onClick={handleEndGame}>
+                  结束游戏
+                </button>
+                <button className="btn btn-error" onClick={handleDissolveRoom}>
+                  解散房间
                 </button>
               </div>
             </div>
@@ -2837,6 +2897,72 @@ const RoomManagePage = () => {
           <button onClick={() => setConfirmDeleteSonglistId(null)}>
             close
           </button>
+        </form>
+      </dialog>
+
+      {/* 结束游戏确认对话框 */}
+      <dialog ref={endGameConfirmDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg">确认结束游戏</h3>
+          <p className="py-3 text-sm">
+            确认结束当前游戏吗？
+            <br />
+            这将显示最终得分并结束游戏。
+          </p>
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                endGameConfirmDialogRef.current?.close();
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={handleConfirmEndGame}
+            >
+              确认结束
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button>close</button>
+        </form>
+      </dialog>
+
+      {/* 解散房间确认对话框 */}
+      <dialog ref={dissolveRoomConfirmDialogRef} className="modal">
+        <div className="modal-box max-w-md">
+          <h3 className="font-bold text-lg text-error">确认解散房间</h3>
+          <p className="py-3 text-sm text-error">
+            警告：此操作将永久删除房间！
+            <br />
+            房间数据将从数据库中移除，此操作不可撤销。
+          </p>
+          <div className="modal-action">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                dissolveRoomConfirmDialogRef.current?.close();
+              }}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-error"
+              onClick={handleConfirmDissolveRoom}
+            >
+              确认解散
+            </button>
+          </div>
+        </div>
+        <form method="dialog" className="modal-backdrop">
+          <button>close</button>
         </form>
       </dialog>
 
