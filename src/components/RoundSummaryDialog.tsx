@@ -50,7 +50,7 @@ export function RoundSummaryDialog({
 
   return (
     <dialog className="modal" open={isOpen}>
-      <div className="modal-box max-w-md">
+      <div className="modal-box max-w-md motion-safe:animate-[buzz-pop_220ms_ease-out]">
         <h3 className="text-xl font-bold">本轮合计</h3>
         <p className="text-sm text-base-content/70 mt-1">你的结算结果</p>
 

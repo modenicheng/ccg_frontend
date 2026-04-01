@@ -69,6 +69,7 @@ const VOLUME_HOTKEY_STEP = 5;
 const VOLUME_TOAST_HIDE_DELAY_MS = 3000;
 const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
 const ROOM_ID_COPY_FEEDBACK_MS = 1800;
+const ROUND_SUMMARY_AUTO_CLOSE_MS = 4000;
 
 let domProgressPercent = 0;
 
@@ -308,8 +309,38 @@ function RoomPage() {
   const volumeToastHideTimerRef = useRef<number | null>(null);
   const volumeToastExitTimerRef = useRef<number | null>(null);
   const roomIdCopyTimerRef = useRef<number | null>(null);
+  const roundSummaryAutoCloseTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
   const isWsDisconnected = !isConnected;
+
+  const closeRoundSummaryDialog = useCallback(() => {
+    if (roundSummaryAutoCloseTimerRef.current !== null) {
+      window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
+      roundSummaryAutoCloseTimerRef.current = null;
+    }
+    setIsRoundSummaryOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isRoundSummaryOpen || roundSummary === null) {
+      return;
+    }
+
+    if (roundSummaryAutoCloseTimerRef.current !== null) {
+      window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
+    }
+
+    roundSummaryAutoCloseTimerRef.current = window.setTimeout(() => {
+      closeRoundSummaryDialog();
+    }, ROUND_SUMMARY_AUTO_CLOSE_MS);
+
+    return () => {
+      if (roundSummaryAutoCloseTimerRef.current !== null) {
+        window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
+        roundSummaryAutoCloseTimerRef.current = null;
+      }
+    };
+  }, [closeRoundSummaryDialog, isRoundSummaryOpen, roundSummary]);
 
   // 窗口 focus 检测 - 用于控制音频音量（每个客户端独立处理）
   useEffect(() => {
@@ -1810,6 +1841,7 @@ function RoomPage() {
         if (isDisposed) {
           return;
         }
+        closeRoundSummaryDialog();
         const roundData = message.data;
         let startProgressMs = 0;
 
@@ -2157,6 +2189,7 @@ function RoomPage() {
     userId,
     wsAuthToken,
     wsAuthUsername,
+    closeRoundSummaryDialog,
   ]);
 
   useEffect(() => {
@@ -2435,6 +2468,10 @@ function RoomPage() {
         window.clearTimeout(roomIdCopyTimerRef.current);
         roomIdCopyTimerRef.current = null;
       }
+      if (roundSummaryAutoCloseTimerRef.current !== null) {
+        window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
+        roundSummaryAutoCloseTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -2687,7 +2724,7 @@ function RoomPage() {
         roundScore={roundSummary?.roundScore ?? 0}
         rankChange={roundSummary?.rankChange ?? null}
         currentRank={roundSummary?.currentRank ?? null}
-        onClose={() => setIsRoundSummaryOpen(false)}
+        onClose={closeRoundSummaryDialog}
       />
     </div>
   );
