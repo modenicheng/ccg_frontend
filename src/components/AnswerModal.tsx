@@ -42,6 +42,7 @@ export function AnswerModal({
           tagGroups={tagGroups}
           selectedTags={selectedTags}
           onSelectTag={onSelectTag}
+          radioNamePrefix="answer-tag-group"
           showHeader={true}
           headerText="选择 Tags"
           className="mb-6"

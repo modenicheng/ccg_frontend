@@ -5,7 +5,8 @@ import type {
   WsTag,
   WsTagGroup,
   AnswerQueueItem,
-  PlaybackState
+  PlaybackState,
+  RoundAnswerItem,
 } from "./wsMessages";
 
 export interface AudioState {
@@ -51,6 +52,8 @@ export interface RoomState {
   // 玩家和队列
   players: RoomStatePlayerItem[]; // 完整的玩家对象
   answer_queue: AnswerQueueItem[];
+  round_scored: boolean;
+  round_answers: RoundAnswerItem[];
 
   // 标签系统
   tag_groups: RoomStateTagGroupItem[];

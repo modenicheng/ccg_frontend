@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { Icon } from "@iconify-icon/react";
+import { useRef } from "react";
 import type { RoomState } from "../types/store";
 
 interface OwnerControlsProps {
@@ -33,7 +34,27 @@ export function OwnerControls({
   onShowSong,
   roomId,
 }: OwnerControlsProps) {
+  const nextRoundConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
+
   if (!isOwner) return null;
+
+  const isRoundCompleted =
+    roomState?.roundState === "COMPLETED" || roomState?.roundStateCode === 4;
+  const canEnterNextRoundDirectly = isRoundCompleted && !isJudging;
+
+  const handleNextRoundClick = () => {
+    if (roomState?.statusCode === 0) {
+      onGameStart();
+      return;
+    }
+
+    if (!canEnterNextRoundDirectly) {
+      nextRoundConfirmDialogRef.current?.showModal();
+      return;
+    }
+
+    onSkipRound();
+  };
 
   return (
     <div className="card shadow-sm min-w-xs">
@@ -72,13 +93,7 @@ export function OwnerControls({
               "btn-warning": roomState?.statusCode !== 0,
             })}
             disabled={isWsDisconnected}
-            onClick={() => {
-              if (roomState?.statusCode === 0) {
-                onGameStart();
-                return;
-              }
-              onSkipRound();
-            }}
+            onClick={handleNextRoundClick}
           >
             {roomState?.statusCode === 0 ? (
               "开始游戏"
@@ -129,6 +144,40 @@ export function OwnerControls({
         >
           管理页面
         </a>
+
+        <dialog ref={nextRoundConfirmDialogRef} className="modal">
+          <div className="modal-box max-w-md">
+            <h3 className="font-bold text-lg">确认进入下一轮</h3>
+            <p className="py-4">
+              {isJudging
+                ? "当前回合已结束但尚未判分，确定要跳过判分并进入下一轮吗？"
+                : "当前回合尚未结束，确定要直接跳过并进入下一轮吗？"}
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => nextRoundConfirmDialogRef.current?.close()}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-warning"
+                disabled={isWsDisconnected}
+                onClick={() => {
+                  nextRoundConfirmDialogRef.current?.close();
+                  onSkipRound();
+                }}
+              >
+                直接跳过
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button type="submit">关闭</button>
+          </form>
+        </dialog>
       </div>
     </div>
   );

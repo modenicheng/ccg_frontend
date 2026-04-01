@@ -129,6 +129,31 @@ const buildRankMap = (scores: PlayerScore[]) => {
   return rankMap;
 };
 
+const applyScoreDeltaUpdate = (
+  previousScores: PlayerScore[],
+  deltaScores: Array<{ player_id: number; username: string; score: number }>,
+) => {
+  const previousByPlayerId = new Map<number, PlayerScore>(
+    previousScores.map((item) => [item.player_id, item]),
+  );
+
+  const nextByPlayerId = new Map<number, PlayerScore>(
+    previousScores.map((item) => [item.player_id, { ...item }]),
+  );
+
+  deltaScores.forEach((item) => {
+    const previous = previousByPlayerId.get(item.player_id);
+    const nextTotal = (previous?.score ?? 0) + item.score;
+    nextByPlayerId.set(item.player_id, {
+      player_id: item.player_id,
+      username: item.username || previous?.username || `玩家${item.player_id}`,
+      score: nextTotal,
+    });
+  });
+
+  return Array.from(nextByPlayerId.values());
+};
+
 function RoomPage() {
   const { roomid } = useParams();
   const roomId = roomid?.trim() ?? "";
@@ -197,6 +222,7 @@ function RoomPage() {
     Record<number, number | null>
   >({});
   const [isJudging, setIsJudging] = useState<boolean>(false);
+  const [hasJudgingSubmitted, setHasJudgingSubmitted] = useState<boolean>(false);
   const [description, setDescription] = useState<string>("");
   const [currentSong, setCurrentSong] = useState<{
     title: string;
@@ -305,6 +331,15 @@ function RoomPage() {
     roundScore: number;
     rankChange: number | null;
     currentRank: number | null;
+  } | null>(null);
+  const [lastJudgedAnswers, setLastJudgedAnswers] = useState<{
+    correctTags: Array<{
+      groupId: number;
+      groupName: string;
+      tagId: number;
+      tagName: string;
+    }>;
+    correctDescriptionIds: number[];
   } | null>(null);
   const volumeToastHideTimerRef = useRef<number | null>(null);
   const volumeToastExitTimerRef = useRef<number | null>(null);
@@ -768,18 +803,43 @@ function RoomPage() {
     }
 
     // 收集选中的标签ID
-    const correctTags = Object.values(selectedTags).filter(
+    const correctTagIds = Object.values(selectedTags).filter(
       (tagId): tagId is number => tagId !== null,
     );
 
     // 收集选中的描述ID
     const correctDescriptionIds = selectedDescriptions;
 
+    // 解析标签名称用于后续显示
+    const resolvedCorrectTags: Array<{
+      groupId: number;
+      groupName: string;
+      tagId: number;
+      tagName: string;
+    }> = [];
+    for (const [groupId, tagId] of Object.entries(selectedTags)) {
+      if (tagId !== null) {
+        const group = tagGroups.find((g) => g.id === Number(groupId));
+        const tag = group?.tags.find((t) => t.id === tagId);
+        resolvedCorrectTags.push({
+          groupId: Number(groupId),
+          groupName: group?.name ?? "",
+          tagId,
+          tagName: tag?.name ?? "",
+        });
+      }
+    }
+
+    setLastJudgedAnswers({
+      correctTags: resolvedCorrectTags,
+      correctDescriptionIds,
+    });
+
     const payload = {
       event: GameEventId.JUDGE_SUBMIT,
       ts: Math.round(getCalibratedNow()),
       data: {
-        correct_tags: correctTags,
+        correct_tags: correctTagIds,
         correct_description_ids: correctDescriptionIds,
         new_correct_descriptions: [],
         skip_scoring: false,
@@ -787,9 +847,10 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
+    setHasJudgingSubmitted(true);
     judgingDialogRef.current?.close();
     confirmAnswerDialogRef.current?.close();
-  }, [selectedTags, selectedDescriptions, getCalibratedNow, isOwner]);
+  }, [selectedTags, selectedDescriptions, tagGroups, getCalibratedNow, isOwner]);
 
   const handleSkipRound = useCallback(() => {
     if (!wsRef.current?.isConnected() || !isOwner) {
@@ -847,6 +908,7 @@ function RoomPage() {
     setPlayerDescriptions([]);
     setCurrentSong(null);
     setIsJudging(false);
+    setHasJudgingSubmitted(false);
 
     const latestRoomState = gameStore.getState().roomState;
     if (latestRoomState) {
@@ -906,7 +968,7 @@ function RoomPage() {
       const isPauseEvent = message.event === GameEventId.PAUSE;
       let expectedMs = Math.max(0, controlData.progress_ms);
 
-      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示“冻结时刻”，不应继续累加 elapsed
+      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示"冻结时刻"，不应继续累加 elapsed
       if (!isPauseEvent) {
         const now = getCalibratedNow();
         const offsetTs =
@@ -921,7 +983,9 @@ function RoomPage() {
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
 
-      if (shouldSeek) {
+      // PAUSE 事件不应 seek：音频已经在 handleBuzz 中通过 pause() 暂停在正确位置
+      // 如果 seek 到 server 返回的 progress_ms，可能因为 server 数据不准确而错误地将进度重置为 0
+      if (shouldSeek && !isPauseEvent) {
         const durationMs = audioRef.current.durationMs;
         const clamped =
           durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
@@ -1080,6 +1144,8 @@ function RoomPage() {
           // 玩家和队列
           players: payload.players,
           answer_queue: payload.answer_queue,
+          round_scored: payload.round_scored ?? false,
+          round_answers: payload.round_answers ?? [],
 
           // 标签系统
           tag_groups: payload.tag_groups,
@@ -1217,6 +1283,15 @@ function RoomPage() {
         syncAnswerQueueState(payload.answer_queue);
 
         setTagGroups(payload.tag_groups);
+        setPlayerAnswers(
+          (payload.round_answers ?? []).map((answer) => ({
+            playerId: answer.player_id,
+            username: answer.username,
+            answers: answer.answers,
+            description: answer.description ?? "",
+            order: answer.order,
+          })),
+        );
         setSelectedTagByGroup(
           payload.tag_groups.reduce<Record<number, number | null>>(
             (acc, group) => {
@@ -1316,6 +1391,7 @@ function RoomPage() {
           setAnswerOrderByUserId({});
           setCurrentAnsweringPlayer(null);
           setIsJudging(false);
+          setHasJudgingSubmitted(false);
           setCurrentSong(null);
           console.log("[PLAY_EVENT] PLAY event processed successfully");
         } catch (err) {
@@ -1501,7 +1577,7 @@ function RoomPage() {
         setPlayerAnswers(playerAnswersFromDescriptions);
       }
 
-      // 初始化选中的标签
+      // 初始化选中的标签（仅基于历史标签，不预选任何玩家的答案）
       const initialSelectedTags: Record<number, number | null> = {};
       latestTagGroups.forEach((group) => {
         // 检查是否有且仅有一个标签在历史标签中
@@ -1529,14 +1605,15 @@ function RoomPage() {
         scores: Array<{ player_id: number; username: string; score: number }>;
       };
     }>(GameEventId.SCORE_UPDATE, (message) => {
-      // 处理得分更新
+      // 处理得分更新（SCORE_UPDATE 为本轮增量，需在前端累加为总分）
       if (message.data?.scores) {
         const previousScores = gameStore.getState().scores;
-        const nextScores = message.data.scores;
+        const deltaScores = message.data.scores;
+        const nextScores = applyScoreDeltaUpdate(previousScores, deltaScores);
 
         const activeUserId = userIdRef.current;
         if (activeUserId !== null) {
-          const previousByUserId = previousScores.reduce<Record<number, number>>(
+          const deltaByUserId = deltaScores.reduce<Record<number, number>>(
             (acc, item) => {
               acc[item.player_id] = item.score;
               return acc;
@@ -1551,8 +1628,7 @@ function RoomPage() {
           );
 
           if (currentScoreEntry) {
-            const previousScore = previousByUserId[activeUserId] ?? 0;
-            const roundScore = currentScoreEntry.score - previousScore;
+            const roundScore = deltaByUserId[activeUserId] ?? 0;
             const previousRank = previousRankMap[activeUserId] ?? null;
             const currentRank = currentRankMap[activeUserId] ?? null;
             const rankChange =
@@ -1914,6 +1990,7 @@ function RoomPage() {
 
         // 8. 隐藏判分界面和曲目信息
         setIsJudging(false);
+        setHasJudgingSubmitted(false);
         setCurrentSong(null);
 
         // 5. 可选：更新回合索引到状态存储（如果需要显示）
@@ -2687,6 +2764,7 @@ function RoomPage() {
         playerDescriptions={playerDescriptions}
         onSelectTag={handleSelectJudgingTag}
         onToggleDescription={handleToggleDescription}
+        isJudgingSubmitted={hasJudgingSubmitted}
       />
 
       <ConfirmAnswerDialog
@@ -2724,6 +2802,9 @@ function RoomPage() {
         roundScore={roundSummary?.roundScore ?? 0}
         rankChange={roundSummary?.rankChange ?? null}
         currentRank={roundSummary?.currentRank ?? null}
+        correctTags={lastJudgedAnswers?.correctTags ?? []}
+        correctDescriptionIds={lastJudgedAnswers?.correctDescriptionIds ?? []}
+        playerDescriptions={playerDescriptions}
         onClose={closeRoundSummaryDialog}
       />
     </div>

@@ -37,6 +37,14 @@ export interface PlaybackState {
   audio_url: string | null;
 }
 
+export interface RoundAnswerItem {
+  player_id: number;
+  username: string;
+  answers: Record<number, number>;
+  description: string | null;
+  order: number;
+}
+
 // PlayControlData与后端playback_schemas.py一致
 export interface PlayControlData {
   progress_ms: number;
@@ -55,6 +63,8 @@ export interface RoomStateData {
   players: WsPlayer[];
   tag_groups: WsTagGroup[];
   answer_queue: AnswerQueueItem[];
+  round_scored: boolean;
+  round_answers: RoundAnswerItem[];
   playback_status: PlaybackState | null;
   scores: Array<{
     player_id: number;

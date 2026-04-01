@@ -23,6 +23,8 @@ interface TagGroupSelectorProps {
   showEmptyState?: boolean;
   /** 空状态提示文本 */
   emptyStateText?: string;
+  /** radio 分组名前缀，避免多个选择器之间 name 冲突 */
+  radioNamePrefix?: string;
 }
 
 /**
@@ -40,6 +42,7 @@ export function TagGroupSelector({
   className = "",
   showEmptyState = true,
   emptyStateText = "暂无可选标签分组",
+  radioNamePrefix = "tag-group",
 }: TagGroupSelectorProps) {
   if (tagGroups.length === 0 && showEmptyState) {
     return (
@@ -128,7 +131,7 @@ export function TagGroupSelector({
                       >
                         <input
                           type="radio"
-                          name={`tag-group-${group.id}`}
+                          name={`${radioNamePrefix}-${group.id}`}
                           className="radio radio-primary radio-sm"
                           checked={isSelected}
                           onChange={() => {

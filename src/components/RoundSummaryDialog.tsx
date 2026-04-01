@@ -1,8 +1,24 @@
+interface CorrectTag {
+  groupId: number;
+  groupName: string;
+  tagId: number;
+  tagName: string;
+}
+
+interface PlayerDescription {
+  id: number;
+  username: string;
+  description: string;
+}
+
 interface RoundSummaryDialogProps {
   isOpen: boolean;
   roundScore: number;
   rankChange: number | null;
   currentRank: number | null;
+  correctTags?: CorrectTag[];
+  correctDescriptionIds?: number[];
+  playerDescriptions?: PlayerDescription[];
   onClose: () => void;
 }
 
@@ -40,6 +56,9 @@ export function RoundSummaryDialog({
   roundScore,
   rankChange,
   currentRank,
+  correctTags = [],
+  correctDescriptionIds = [],
+  playerDescriptions = [],
   onClose,
 }: RoundSummaryDialogProps) {
   if (!isOpen) {
@@ -47,6 +66,10 @@ export function RoundSummaryDialog({
   }
 
   const rankChangeDisplay = renderRankChange(rankChange);
+
+  const selectedPlayerDescs = playerDescriptions.filter(
+    (pd) => correctDescriptionIds.includes(pd.id),
+  );
 
   return (
     <dialog className="modal" open={isOpen}>
@@ -84,6 +107,46 @@ export function RoundSummaryDialog({
             </div>
           </div>
         </div>
+
+        {(correctTags.length > 0 || selectedPlayerDescs.length > 0) && (
+          <div className="mt-4">
+            <h4 className="font-semibold text-sm text-base-content/70 mb-2">
+              本轮正确答案
+            </h4>
+            <div className="card bg-base-200 p-3">
+              {correctTags.length > 0 && (
+                <div className="mb-2">
+                  <div className="text-xs text-base-content/60 mb-1">标签</div>
+                  <div className="flex flex-wrap gap-1">
+                    {correctTags.map((tag) => (
+                      <span
+                        key={tag.tagId}
+                        className="badge badge-primary badge-sm"
+                      >
+                        {tag.groupName}: {tag.tagName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {selectedPlayerDescs.length > 0 && (
+                <div>
+                  <div className="text-xs text-base-content/60 mb-1">
+                    精确描述
+                  </div>
+                  <ul className="text-sm space-y-1">
+                    {selectedPlayerDescs.map((desc) => (
+                      <li key={desc.id} className="flex gap-2">
+                        <span className="font-medium">{desc.username}:</span>
+                        <span className="opacity-80">{desc.description}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="modal-action">
           <button type="button" className="btn btn-primary" onClick={onClose}>

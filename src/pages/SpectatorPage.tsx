@@ -339,6 +339,8 @@ function SpectatorPage() {
           // 玩家和队列
           players: payload.players,
           answer_queue: payload.answer_queue,
+          round_scored: payload.round_scored ?? false,
+          round_answers: payload.round_answers ?? [],
 
           // 标签系统
           tag_groups: payload.tag_groups,
@@ -441,6 +443,15 @@ function SpectatorPage() {
         // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
         setOnlinePlayers(payload.players);
         syncAnswerQueueState(payload.answer_queue);
+        setPlayerAnswers(
+          (payload.round_answers ?? []).map((answer) => ({
+            playerId: answer.player_id,
+            username: answer.username,
+            answers: answer.answers,
+            description: answer.description ?? "",
+            order: answer.order,
+          })),
+        );
 
         setTagGroups(payload.tag_groups);
       },

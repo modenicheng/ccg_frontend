@@ -21,6 +21,7 @@ interface JudgingDialogProps {
   playerDescriptions: PlayerDescription[];
   onSelectTag: (groupId: number, tagId: number) => void;
   onToggleDescription: (descriptionId: number) => void;
+  isJudgingSubmitted?: boolean;
 }
 
 export function JudgingDialog({
@@ -35,6 +36,7 @@ export function JudgingDialog({
   playerDescriptions,
   onSelectTag,
   onToggleDescription,
+  isJudgingSubmitted = false,
 }: JudgingDialogProps) {
   return (
     <dialog ref={dialogRef} className="modal">
@@ -64,6 +66,7 @@ export function JudgingDialog({
             tagGroups={tagGroups}
             selectedTags={selectedTags}
             onSelectTag={onSelectTag}
+            radioNamePrefix="judging-tag-group"
             highlightTagIds={historyTagIds}
             readOnly={false}
             showHeader={false}
@@ -124,9 +127,28 @@ export function JudgingDialog({
           <button
             type="button"
             className="btn btn-primary"
-            onClick={() => confirmAnswerDialogRef.current?.showModal()}
+            disabled={
+              isJudgingSubmitted ||
+              Object.values(selectedTags).some((v) => v === null) ||
+              (playerDescriptions.length > 0 &&
+                playerDescriptions.some((pd) => !selectedDescriptions.includes(pd.id)))
+            }
+            onClick={() => {
+              const hasAllTagsSelected = tagGroups.every(
+                (group) => selectedTags[group.id] !== null,
+              );
+              const hasAllDescriptionsSelected =
+                playerDescriptions.length === 0 ||
+                playerDescriptions.every(
+                  (pd) => selectedDescriptions.includes(pd.id),
+                );
+
+              if (hasAllTagsSelected && hasAllDescriptionsSelected) {
+                confirmAnswerDialogRef.current?.showModal();
+              }
+            }}
           >
-            确认答案
+            {isJudgingSubmitted ? "已判分" : "确认答案"}
           </button>
         </div>
       </div>
