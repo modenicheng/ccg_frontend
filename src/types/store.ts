@@ -43,6 +43,7 @@ export interface RoomState {
   // 回合状态
   roundState: "PENDING" | "PLAYING_AUDIO" | "ANSWERING" | "JUDGING" | "COMPLETED";
   roundStateCode: 0 | 1 | 2 | 3 | 4; // 原始回合状态码
+  show_answer: boolean;
 
   // 播放相关
   song_start_range_percent: number | null;

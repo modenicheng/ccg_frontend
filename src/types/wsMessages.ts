@@ -50,6 +50,7 @@ export interface RoomStateData {
   title: string | null;
   status: 0 | 1 | 2; // 0=waiting, 1=playing, 2=ended
   round_state: 0 | 1 | 2 | 3 | 4; // 0=PENDING, 1=PLAYING_AUDIO, 2=ANSWERING, 3=JUDGING, 4=COMPLETED
+  show_answer: boolean;
   song_start_range_percent: number | null;
   players: WsPlayer[];
   tag_groups: WsTagGroup[];

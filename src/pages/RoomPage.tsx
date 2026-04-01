@@ -838,6 +838,14 @@ function RoomPage() {
     setCurrentSong(null);
     setIsJudging(false);
 
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        show_answer: false,
+      });
+    }
+
     setSelectedTags({});
     setSelectedTagByGroup((prev) => {
       const next: Record<number, number | null> = {};
@@ -1054,6 +1062,7 @@ function RoomPage() {
               : "PENDING",
           roundStateCode:
             typeof payload.round_state === "number" ? payload.round_state : 0,
+          show_answer: payload.show_answer ?? false,
 
           // 播放相关
           song_start_range_percent: payload.song_start_range_percent,
@@ -1526,6 +1535,14 @@ function RoomPage() {
           album: message.data?.album ?? "",
           coverUrl: message.data?.cover ?? "",
         });
+
+        const latestRoomState = gameStore.getState().roomState;
+        if (latestRoomState) {
+          gameStore.getState().setRoomState({
+            ...latestRoomState,
+            show_answer: true,
+          });
+        }
       },
     );
 
@@ -2198,16 +2215,36 @@ function RoomPage() {
     }
   }, [localVolume]);
 
-  // 根据窗口 focus 状态动态调整音量（每个客户端独立处理）
+  // WAITING 阶段默认循环播放（预热保活），PLAYING 阶段默认播完即停
   useEffect(() => {
     if (!audioRef.current) {
       return;
     }
 
-    // 窗口失焦时静音，聚焦时恢复用户设定的音量
-    const targetVolume = isWindowFocused ? localVolume : 0;
+    audioRef.current.setLoop(roomState?.status === "waiting");
+  }, [roomState?.status]);
+
+  // 根据窗口 focus 状态与房间状态动态调整音量（每个客户端独立处理）
+  useEffect(() => {
+    if (!audioRef.current) {
+      return;
+    }
+
+    // PLAYING：禁用失焦静音，始终使用用户设定音量
+    // WAITING：失焦时降到极低音量 0.0001，保持后台音频链路活跃
+    // 其他状态：沿用原有失焦静音策略
+    const roomStatus = roomState?.status;
+    const targetVolume =
+      roomStatus === "playing"
+        ? localVolume
+        : !isWindowFocused
+          ? roomStatus === "waiting"
+            ? 0.0001
+            : 0
+          : localVolume;
+
     audioRef.current.volume = targetVolume;
-  }, [isWindowFocused, localVolume]);
+  }, [isWindowFocused, localVolume, roomState?.status]);
 
   useEffect(() => {
     const parent = canvasParentRef.current;

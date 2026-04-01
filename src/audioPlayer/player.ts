@@ -33,6 +33,7 @@ class audioPlayer {
   private smmothedData?: Float32Array;
   private smmothingFactor: number = 0.6; // 平滑因子，范围 [0, 1]，值越小越平滑
   private preloadTable: Record<string, { audio: HTMLAudioElement; loaded: boolean; error?: Error; retryCount: number }> = {};
+  private loopEnabled: boolean = false;
   private frequencyBands: FrequencyBandRange[] = [];
   private frequencyBandsCacheKey = "";
 
@@ -583,7 +584,7 @@ class audioPlayer {
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
     audio.src = url;
-    audio.loop = false;
+    audio.loop = this.loopEnabled;
 
     console.log(`[PRELOAD] Starting preload for URL: ${url}`);
 
@@ -676,7 +677,7 @@ class audioPlayer {
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
     audio.src = url;
-    audio.loop = false;
+    audio.loop = this.loopEnabled;
     // 存储预加载引用供下次使用
     this.preloadTable[url] = { audio, loaded: false, error: undefined, retryCount: 0 };
 
@@ -705,7 +706,7 @@ class audioPlayer {
     // 确保音频元素属性正确
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
-    audio.loop = false;
+    audio.loop = this.loopEnabled;
     audio.currentTime = 0;
 
     await this.setupAudioElement(audio, url, playByDefault);
@@ -716,7 +717,7 @@ class audioPlayer {
    */
   private async setupAudioElement(
     audio: HTMLAudioElement,
-    url: string,
+    _url: string,
     playByDefault: boolean,
   ): Promise<void> {
     audio.ontimeupdate = this.timeUpdateCallback;
@@ -898,6 +899,13 @@ class audioPlayer {
         finalize(audio.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA);
       }, timeoutMs);
     });
+  }
+
+  setLoop(enabled: boolean) {
+    this.loopEnabled = enabled;
+    if (this.audioElement) {
+      this.audioElement.loop = enabled;
+    }
   }
 
   async togglePlay() {

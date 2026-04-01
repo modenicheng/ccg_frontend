@@ -72,6 +72,7 @@ function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
     statusCode,
     roundState: data.roundState ?? "PENDING",
     roundStateCode: data.roundStateCode ?? 0,
+    show_answer: false,
     song_start_range_percent: null,
     players: [], // full player objects not available
     answer_queue: [],
@@ -1034,7 +1035,7 @@ const RoomManagePage = () => {
   const handleConfirmDissolveRoom = async () => {
     try {
       // 调用解散房间 API
-      await fetch(`/api/room/${encodeURIComponent(roomid)}/dissolve`, {
+      await fetch(`/api/room/${encodeURIComponent(roomId)}/dissolve`, {
         method: 'DELETE',
       });
 

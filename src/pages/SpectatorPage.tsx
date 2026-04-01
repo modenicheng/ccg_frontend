@@ -25,6 +25,7 @@ import type {
   ClearAnswerQueueMessage,
   PreloadAudioMessage,
   TagGroupMessage,
+  ShowSongMessage,
   PlaybackState,
 } from "../types/wsMessages";
 import {
@@ -198,6 +199,14 @@ function SpectatorPage() {
     setPlayerAnswers([]);
     setIsJudging(false);
     setCurrentSong(null);
+
+    const latestRoomState = gameStore.getState().roomState;
+    if (latestRoomState) {
+      gameStore.getState().setRoomState({
+        ...latestRoomState,
+        show_answer: false,
+      });
+    }
   }, []);
 
   const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
@@ -322,6 +331,7 @@ function SpectatorPage() {
           // 回合状态
           roundState: typeof payload.round_state === "string" ? payload.round_state : "PENDING",
           roundStateCode: typeof payload.round_state === "number" ? payload.round_state : 0,
+          show_answer: payload.show_answer ?? false,
 
           // 播放相关
           song_start_range_percent: payload.song_start_range_percent,
@@ -670,6 +680,25 @@ function SpectatorPage() {
         gameStore.getState().setScores(message.data.scores);
       }
     });
+    wsRef.current.onJsonEvent<ShowSongMessage>(
+      GameEventId.SHOW_SONG,
+      (message) => {
+        setCurrentSong({
+          title: message.data?.title ?? "",
+          artist: message.data?.author ?? "",
+          album: message.data?.album ?? "",
+          coverUrl: message.data?.cover ?? "",
+        });
+
+        const latestRoomState = gameStore.getState().roomState;
+        if (latestRoomState) {
+          gameStore.getState().setRoomState({
+            ...latestRoomState,
+            show_answer: true,
+          });
+        }
+      },
+    );
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PAUSE,
       async (message) => {
