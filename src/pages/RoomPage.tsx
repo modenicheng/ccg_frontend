@@ -1,5 +1,3 @@
-import clsx from "clsx";
-import { Icon } from "@iconify-icon/react";
 import { useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
@@ -11,8 +9,26 @@ import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
-import type { RoomState } from "../types/store";
-import { UserBar, TagGroupSelector, SongInfoCard } from "../components";
+import { useIsOwner } from "../hooks";
+import type { RoomState, PlayerScore } from "../types/store";
+import {
+  SongInfoCard,
+  SettingDialog,
+  JudgingDialog,
+  ConfirmAnswerDialog,
+  RemovePlayerDialog,
+  AnswerModal,
+  AnswerModalFloatingButton,
+  VolumeToast,
+  ConnectionStatusBar,
+  OwnerControls,
+  RoomInfo,
+  BuzzButton,
+  Scoreboard,
+  PlayerList,
+  PlayerAnswersTable,
+  RoundSummaryDialog,
+} from "../components";
 import type {
   WsTagGroup,
   WsPlayer,
@@ -42,6 +58,7 @@ import {
   getTagGroupsSimple,
 } from "../types/wsMessages";
 import { syncRoomAuthCookie, syncRoomAuthToSession } from "../utils/roomAuth";
+import { readCookie, clearCookie, copyTextToClipboard, parseErrorMessage } from "../utils/common";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -54,7 +71,6 @@ const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
 const ROOM_ID_COPY_FEEDBACK_MS = 1800;
 
 let domProgressPercent = 0;
-const themes = ["light", "dark", "night", "cyberpunk", "emerald", "nord"];
 
 const logAudioTrigger = (
   source: "PRELOAD" | "ROOM_STATE" | "ROUND_START",
@@ -82,25 +98,6 @@ const buildWsUrl = (roomId: string, token: string | null) => {
   return pathname + (token ? `?token=${encodeURIComponent(token)}` : "");
 };
 
-const readCookie = (name: string): string | null => {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matched = document.cookie.match(
-    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
-  );
-  if (!matched) {
-    return null;
-  }
-  try {
-    return decodeURIComponent(matched[1]);
-  } catch {
-    return matched[1];
-  }
-};
-
-const clearCookie = (name: string) => {
-  document.cookie = `${name}=; path=/; Max-Age=0; SameSite=Lax`;
-};
-
 const clearRoomIdentityStorage = (roomId: string) => {
   const tokenKey = `ccg-room-token:${roomId}`;
   const userIdKey = `ccg-room-user-id:${roomId}`;
@@ -115,35 +112,20 @@ const clearRoomIdentityStorage = (roomId: string) => {
   clearCookie(usernameKey);
 };
 
-const parseErrorMessage = (error: unknown, fallback: string): string => {
-  if (error instanceof Error && error.message) {
-    return `${fallback}：${error.message}`;
-  }
-  return fallback;
-};
-
-const copyTextToClipboard = async (text: string) => {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.setAttribute("readonly", "true");
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  document.body.appendChild(textArea);
-  textArea.select();
-
-  try {
-    const copied = document.execCommand("copy");
-    if (!copied) {
-      throw new Error("execCommand copy failed");
+const buildRankMap = (scores: PlayerScore[]) => {
+  const sortedScores = [...scores].sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
     }
-  } finally {
-    document.body.removeChild(textArea);
-  }
+    return a.player_id - b.player_id;
+  });
+
+  const rankMap: Record<number, number> = {};
+  sortedScores.forEach((entry, index) => {
+    rankMap[entry.player_id] = index + 1;
+  });
+
+  return rankMap;
 };
 
 function RoomPage() {
@@ -263,16 +245,7 @@ function RoomPage() {
   // const [isReady, setIsReady] = useState<boolean>(false);
   // const [setCountdown] = useState<number | null>(null);
 
-  // 房主判定：优先使用持久化身份，回退到房间实时玩家列表判定（避免本地状态缺失导致误判）
-  const isOwner = useMemo(() => {
-    if (user?.isOwner) {
-      return true;
-    }
-    if (userId === null || !roomState?.players?.length) {
-      return false;
-    }
-    return roomState.players.some((player) => player.id === userId && player.is_owner);
-  }, [roomState?.players, user?.isOwner, userId]);
+  const isOwner = useIsOwner(user, userId, roomState);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -326,6 +299,12 @@ function RoomPage() {
   const [roomIdCopyState, setRoomIdCopyState] = useState<
     "idle" | "success" | "error"
   >("idle");
+  const [isRoundSummaryOpen, setIsRoundSummaryOpen] = useState<boolean>(false);
+  const [roundSummary, setRoundSummary] = useState<{
+    roundScore: number;
+    rankChange: number | null;
+    currentRank: number | null;
+  } | null>(null);
   const volumeToastHideTimerRef = useRef<number | null>(null);
   const volumeToastExitTimerRef = useRef<number | null>(null);
   const roomIdCopyTimerRef = useRef<number | null>(null);
@@ -1521,9 +1500,47 @@ function RoomPage() {
     }>(GameEventId.SCORE_UPDATE, (message) => {
       // 处理得分更新
       if (message.data?.scores) {
+        const previousScores = gameStore.getState().scores;
+        const nextScores = message.data.scores;
+
+        const activeUserId = userIdRef.current;
+        if (activeUserId !== null) {
+          const previousByUserId = previousScores.reduce<Record<number, number>>(
+            (acc, item) => {
+              acc[item.player_id] = item.score;
+              return acc;
+            },
+            {},
+          );
+
+          const previousRankMap = buildRankMap(previousScores);
+          const currentRankMap = buildRankMap(nextScores);
+          const currentScoreEntry = nextScores.find(
+            (item) => item.player_id === activeUserId,
+          );
+
+          if (currentScoreEntry) {
+            const previousScore = previousByUserId[activeUserId] ?? 0;
+            const roundScore = currentScoreEntry.score - previousScore;
+            const previousRank = previousRankMap[activeUserId] ?? null;
+            const currentRank = currentRankMap[activeUserId] ?? null;
+            const rankChange =
+              previousRank !== null && currentRank !== null
+                ? previousRank - currentRank
+                : null;
+
+            setRoundSummary({
+              roundScore,
+              rankChange,
+              currentRank,
+            });
+            setIsRoundSummaryOpen(true);
+          }
+        }
+
         // 更新游戏状态中的得分信息
-        console.log("Score updated:", message.data.scores);
-        gameStore.getState().setScores(message.data.scores);
+        console.log("Score updated:", nextScores);
+        gameStore.getState().setScores(nextScores);
       }
     });
     wsRef.current.onJsonEvent<ShowSongMessage>(
@@ -2539,53 +2556,15 @@ function RoomPage() {
 
   return (
     <div className="flex flex-col gap-4 p-4 max-w-400 mx-auto">
-      <div className="w-full flex gap-2">
-        <div className="card shadow-sm">
-          <div className="card-body p-4 flex-row items-center gap-2">
-            <span
-              className={clsx("status", {
-                "status-success animate-pulse": isConnected,
-                "status-error": !isConnected,
-              })}
-            ></span>
-            <span
-              className={clsx("font-mono text-sm", {
-                "text-success": isConnected && latencyAvg && latencyAvg < 40,
-                "text-warning":
-                  isConnected &&
-                  latencyAvg &&
-                  latencyAvg >= 40 &&
-                  latencyAvg < 100,
-                "text-error":
-                  !isConnected || (latencyAvg !== null && latencyAvg >= 100),
-              })}
-            >
-              {isConnected
-                ? latencyAvg !== null
-                  ? `${latencyAvg.toFixed(1)} ms`
-                  : "N/A"
-                : "Connecting..."}
-            </span>
-          </div>
-        </div>
-        <div className="card shadow-sm flex-1 overflow-hidden progress-parent">
-          <div className="card-body p-0 h-12" ref={canvasParentRef}>
-            <canvas ref={canvasRef}></canvas>
-            <span ref={progressBarRef} className="progress-bar" />
-          </div>
-        </div>
-        <div
-          className="btn btn-ghost h-full p-3 shadow-sm"
-          onClick={() => settingDialogRef.current?.showModal()}
-        >
-          <Icon
-            icon="heroicons:cog-6-tooth"
-            width={28}
-            height={28}
-            cellPadding={0}
-          />
-        </div>
-      </div>
+      <ConnectionStatusBar
+        isConnected={isConnected}
+        latencyAvg={latencyAvg}
+        settingDialogRef={settingDialogRef}
+        canvasRef={canvasRef}
+        canvasParentRef={canvasParentRef}
+        progressBarRef={progressBarRef}
+      />
+
       <div className="flex gap-2 w-full">
         <SongInfoCard
           songInfo={currentSong}
@@ -2594,709 +2573,122 @@ function RoomPage() {
           className="flex-1"
           showAlbum={true}
         />
-        {isOwner ? (
-          <div className="card shadow-sm min-w-xs">
-            <div className="card-body user-drag-none">
-              <button
-                type="button"
-                className={clsx("btn btn-sm btn-soft", {
-                  "btn-success": audioState !== "running",
-                  "btn-warning": audioState === "running",
-                })}
-                disabled={isPlaybackStateMissing || isWsDisconnected}
-                onClick={handleTogglePlayPause}
-              >
-                {isPlaybackStateMissing ? (
-                  "暂无播放状态"
-                ) : (
-                  <>
-                    <Icon
-                      icon={
-                        audioState === "running"
-                          ? "heroicons:pause"
-                          : "heroicons:play"
-                      }
-                      width={16}
-                      height={16}
-                    />
-                    {audioState === "running" ? "暂停" : "播放"}
-                  </>
-                )}
-              </button>
-              <div className="join w-full">
-                <button
-                  type="button"
-                  className={clsx("btn btn-sm btn-soft join-item flex-1", {
-                    "btn-primary": roomState?.statusCode === 0,
-                    "btn-warning": roomState?.statusCode !== 0,
-                  })}
-                  disabled={isWsDisconnected}
-                  onClick={() => {
-                    if (roomState?.statusCode === 0) {
-                      handleGameStart();
-                      return;
-                    }
-                    handleSkipRound();
-                  }}
-                >
-                  {roomState?.statusCode === 0 ? (
-                    "开始游戏"
-                  ) : (
-                    <>
-                      <Icon
-                        icon="heroicons:chevron-double-right-20-solid"
-                        width={16}
-                        height={16}
-                      />
-                      下一轮
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  className={clsx("btn btn-sm btn-soft join-item flex-1", {
-                    "btn-info": !isJudging,
-                    "btn-success": isJudging,
-                  })}
-                  disabled={isWsDisconnected}
-                  onClick={() => {
-                    if (isJudging) {
-                      // 判分模式下，打开判分弹窗
-                      judgingDialogRef.current?.showModal();
-                    } else {
-                      // 游戏进行中，强制结束回合进入判分
-                      handleEndRound();
-                    }
-                  }}
-                >
-                  <Icon icon="heroicons:scale" width={16} height={16} />
-                  {isJudging ? "判分" : "结束回合"}
-                </button>
-              </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-secondary btn-soft"
-                disabled={isWsDisconnected}
-                onClick={handleShowSong}
-              >
-                <Icon icon="heroicons:eye" width={16} height={16} />
-                展示答案
-              </button>
-              <a
-                className="btn btn-sm  btn-soft"
-                href={`/room/${roomId}/manage`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                管理页面
-              </a>
-            </div>
-          </div>
-        ) : null}
-        <div className="card shadow-sm max-w-sm min-w-3xs">
-          <div className="card-body">
-            <h2 className="text-lg font-semibold flex items-center">
-              <Icon
-                icon="heroicons:home"
-                className="mr-2"
-                width="24"
-                height="24"
-              />
-              {roomState?.roomId ? `${roomState.title}` : "房间信息"}
-            </h2>
-            <div className="divider m-0"></div>
-            <div>房主： {roomOwner}</div>
-            <div className="flex items-center gap-1.5 text-sm">
-              <span>
-                房间ID： <span className="font-mono">{roomId}</span>
-              </span>
-              <button
-                type="button"
-                className={clsx("btn btn-ghost btn-xs btn-square", {
-                  "text-success": roomIdCopyState === "success",
-                  "text-error": roomIdCopyState === "error",
-                })}
-                onClick={handleCopyRoomId}
-                title={
-                  roomIdCopyState === "success"
-                    ? "已复制"
-                    : roomIdCopyState === "error"
-                      ? "复制失败"
-                      : "复制房间ID"
-                }
-                aria-label={`复制房间ID ${roomId}`}
-              >
-                <Icon
-                  icon={
-                    roomIdCopyState === "success"
-                      ? "heroicons:clipboard-document-check"
-                      : roomIdCopyState === "error"
-                        ? "heroicons:exclamation-circle"
-                        : "heroicons:clipboard-document"
-                  }
-                  width={16}
-                  height={16}
-                />
-              </button>
-            </div>
-            {/* <div className="text-sm mt-2">
-              回合状态：
-              <span
-                className={clsx("px-2 py-0.5 rounded text-xs font-medium", {
-                  "bg-blue-100 text-blue-800":
-                    gameStore.getState().roundState === "PENDING",
-                  "bg-green-100 text-green-800":
-                    gameStore.getState().roundState === "PLAYING_AUDIO",
-                  "bg-yellow-100 text-yellow-800":
-                    gameStore.getState().roundState === "ANSWERING",
-                  "bg-purple-100 text-purple-800":
-                    gameStore.getState().roundState === "JUDGING",
-                  "bg-gray-100 text-gray-800":
-                    gameStore.getState().roundState === "COMPLETED",
-                })}
-              >
-                {gameStore.getState().roundState}
-              </span>
-            </div>
-            <div className="join w-full mt-4">
-              <button
-                type="button"
-                className={clsx("btn btn-soft btn-sm join-item flex-1", {
-                  "btn-success": isReady,
-                  "btn-primary": !isReady,
-                })}
-                onClick={handleReady}
-                disabled={!isConnected}
-              >
-                {isReady ? "取消准备" : "准备"}
-              </button>
-              {countdown !== null && (
-                <div className="text-center py-2 bg-base-200 rounded-lg">
-                  <div className="text-sm opacity-70">游戏即将开始</div>
-                  <div className="text-2xl font-bold">{countdown}</div>
-                </div>
-              )}
-            </div> */}
-          </div>
-        </div>
+        <OwnerControls
+          isOwner={isOwner}
+          audioState={audioState}
+          isPlaybackStateMissing={isPlaybackStateMissing}
+          isWsDisconnected={isWsDisconnected}
+          isJudging={isJudging}
+          roomState={roomState}
+          judgingDialogRef={judgingDialogRef}
+          onTogglePlayPause={handleTogglePlayPause}
+          onGameStart={handleGameStart}
+          onSkipRound={handleSkipRound}
+          onEndRound={handleEndRound}
+          onShowSong={handleShowSong}
+          roomId={roomId}
+        />
+        <RoomInfo
+          roomId={roomId}
+          roomTitle={roomState?.title}
+          roomOwner={roomOwner}
+          roomIdCopyState={roomIdCopyState}
+          onCopyRoomId={handleCopyRoomId}
+        />
       </div>
+
       <div className="flex gap-2 w-full">
-        <div className="card shadow-sm">
-          <button
-            type="button"
-            className={clsx("btn btn-primary w-2xs h-full p-4 flex-col gap-4", {
-              "btn-disabled":
-                !isConnected || isCurrentPlayerInAnswerQueue || !user || roomState?.status !== "playing",
-              "btn-active": isBuzzHotkeyActive,
-            })}
-            disabled={!isConnected || isCurrentPlayerInAnswerQueue || !user || roomState?.status !== "playing"}
-            onClick={handleBuzz}
-          >
-            <h2 className="text-3xl">抢答！</h2>
-            <div className="flex">
-              <div className="kbd kbd-sm font-mono text-base-content">
-                Space ␣
-              </div>
-              <div className="divider divider-horizontal m-0"></div>
-              <div className="kbd kbd-sm font-mono text-base-content">
-                Enter ⏎
-              </div>
-            </div>
-          </button>
-        </div>
-        <div className="card shadow-sm flex-1 min-h-56">
-          <div className="card-body overflow-auto p-0">
-            <table className="table table-pin-cols table-pin-rows">
-              <thead>
-                <tr>
-                  <th className="w-4 text-end">排名</th>
-                  <th className="">玩家</th>
-                  <td className="w-6 text-end">总分</td>
-                </tr>
-              </thead>
-              <tbody>
-                {scores.length > 0 ? (
-                  [...scores]
-                    .sort((a, b) => b.score - a.score)
-                    .map((player, index) => (
-                      <tr
-                        key={player.player_id}
-                        className={clsx({
-                          "bg-primary/10 font-bold":
-                            userId !== null && player.player_id === userId,
-                        })}
-                      >
-                        <th className="text-end">{index + 1}</th>
-                        <th className="text-nowrap">{player.username}</th>
-                        <td className="text-end">{player.score}</td>
-                      </tr>
-                    ))
-                ) : (
-                  <tr>
-                    <td colSpan={3} className="text-center">
-                      暂无得分记录
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
-          <div className="card-body p-2">
-            <ul className="list gap-2">
-              <li className="list-row">
-                <h2 className="font-semibold flex items-center text-lg">
-                  <Icon
-                    icon="heroicons:users"
-                    width={24}
-                    height={24}
-                    className="inline mr-1"
-                  />
-                  玩家列表
-                </h2>
-              </li>
-              {sortedOnlinePlayers.length > 0 ? (
-                sortedOnlinePlayers.map((player) => {
-                  const order = answerOrderByUserId[player.id];
-                  const isCurrentUser = userId !== null && player.id === userId;
-                  return (
-                    <li
-                      key={player.id}
-                      className={clsx("px-2 transition-all duration-300", {
-                        "buzz-ordered-item": typeof order === "number",
-                      })}
-                    >
-                      <div className="flex items-center justify-between">
-                        <UserBar
-                          username={player.username}
-                          order={order}
-                          activate={typeof order === "number"}
-                          answering={currentAnsweringPlayer === player.id}
-                          isSelf={isCurrentUser}
-                          online={player.online}
-                          showKickAction={isOwner && !isCurrentUser}
-                          kickDisabled={isWsDisconnected}
-                          onKick={() => handleRemovePlayer(player.id)}
-                        />
-                      </div>
-                    </li>
-                  );
-                })
-              ) : (
-                <li className="list-row px-2 text-sm opacity-60">
-                  暂无玩家
-                </li>
-              )}
-            </ul>
-          </div>
-        </div>
+        <BuzzButton
+          isConnected={isConnected}
+          isCurrentPlayerInAnswerQueue={isCurrentPlayerInAnswerQueue}
+          isBuzzHotkeyActive={isBuzzHotkeyActive}
+          user={user}
+          roomStatus={roomState?.status}
+          onBuzz={handleBuzz}
+        />
+        <Scoreboard scores={scores} userId={userId} />
+        <PlayerList
+          sortedOnlinePlayers={sortedOnlinePlayers}
+          answerOrderByUserId={answerOrderByUserId}
+          currentAnsweringPlayer={currentAnsweringPlayer}
+          userId={userId}
+          isOwner={isOwner}
+          isWsDisconnected={isWsDisconnected}
+          onRemovePlayer={handleRemovePlayer}
+        />
       </div>
 
-      {/* 玩家作答情况展示表格 */}
-      <div className="card shadow-sm">
-        <div className="card-body p-0">
-          <h3 className="font-semibold text-lg p-4 border-b">
-            <Icon
-              icon="heroicons:clipboard-list"
-              width={20}
-              height={20}
-              className="inline mr-2"
-            />
-            玩家作答情况
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="table table-pin-cols table-pin-rows">
-              <thead>
-                <tr>
-                  <th className="w-4 text-end">顺序</th>
-                  <th className="">玩家</th>
-                  {tagGroups.map((group) => (
-                    <th key={group.id} className="text-center min-w-20">
-                      {group.name}
-                    </th>
-                  ))}
-                  <th className="min-w-40">精确描述</th>
-                </tr>
-              </thead>
-              <tbody>
-                {playerAnswers.length > 0 ? (
-                  playerAnswers
-                    .sort((a, b) => a.order - b.order)
-                    .map((answer) => (
-                      <tr
-                        key={answer.playerId}
-                        className={clsx({
-                          "bg-primary/10 font-bold":
-                            userId !== null && answer.playerId === userId,
-                        })}
-                      >
-                        <th className="text-end">{answer.order}</th>
-                        <th className="text-nowrap">{answer.username}</th>
-                        {tagGroups.map((group) => {
-                          const selectedTagId = answer.answers[group.id];
-                          const selectedTag = group.tags.find(
-                            (tag) => tag.id === selectedTagId,
-                          );
-                          return (
-                            <td key={group.id} className="text-center">
-                              {selectedTag ? selectedTag.name : "-"}
-                            </td>
-                          );
-                        })}
-                        <td className="max-w-40 truncate">
-                          {answer.description || "-"}
-                        </td>
-                      </tr>
-                    ))
-                ) : (
-                  <tr>
-                    <td colSpan={tagGroups.length + 3} className="text-center">
-                      暂无作答记录
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <PlayerAnswersTable
+        playerAnswers={playerAnswers}
+        tagGroups={tagGroups}
+        userId={userId}
+      />
 
-      {isVolumeToastVisible ? (
-        <div className="toast toast-top toast-start z-50">
-          <div
-            className={clsx(
-              "card bg-base-100 shadow-lg w-64 transition-all duration-200 ease-out",
-              {
-                "opacity-100 translate-y-0 scale-100": !isVolumeToastClosing,
-                "opacity-0 -translate-y-1 scale-95": isVolumeToastClosing,
-              },
-            )}
-          >
-            <div className="card-body gap-2 p-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-semibold">音量</span>
-                <span className="font-mono">{localVolume}%</span>
-              </div>
-              <progress
-                className={clsx("progress w-full volume-progress-eased", {
-                  "progress-primary": localVolume <= 100,
-                  "progress-warning": localVolume > 100 && localVolume <= 150,
-                  "progress-error": localVolume > 150,
-                })}
-                value={localVolume}
-                max="200"
-              ></progress>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <VolumeToast
+        isVisible={isVolumeToastVisible}
+        isClosing={isVolumeToastClosing}
+        localVolume={localVolume}
+      />
 
-      <dialog ref={settingDialogRef} className="modal">
-        <div className="modal-box w-full max-w-200">
-          <h2 className="font-bold text-2xl">设置</h2>
-          <div className="divider mt-0.5 mb-0.5"></div>
-          <div className="flex flex-col gap-1.5">
-            <h3 className="font-semibold text-xl">主题</h3>
-            <div className="flex">
-              <div className="join join-horizontal">
-                {themes.map((themeName) => (
-                  <input
-                    key={themeName}
-                    type="radio"
-                    name="theme-buttons"
-                    className="btn theme-controller join-item"
-                    aria-label={themeName[0].toUpperCase() + themeName.slice(1)}
-                    value={themeName}
-                    checked={theme === themeName}
-                    onChange={() => setTheme(themeName)}
-                  />
-                ))}
-              </div>
-            </div>
-            <div className="text-xs text-gray-400">
-              你可以挑一个自己喜欢的主题~
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5 mt-4">
-            <h3 className="font-semibold text-xl">音量</h3>
-            <div className="text-xs opacity-70 flex items-center gap-1">
-              快捷键：
-              <kbd className="kbd kbd-xs">-</kbd>
-              <span>/</span>
-              <kbd className="kbd kbd-xs">=</kbd>
-              <span>（</span>
-              <kbd className="kbd kbd-xs">+</kbd>
-              <span>）</span>
-            </div>
-            <div className="flex">
-              <input
-                type="range"
-                min={0}
-                max={200}
-                value={localVolume}
-                className={clsx("range flex-1", {
-                  "range-primary": localVolume <= 100,
-                  "range-warning": localVolume > 100 && localVolume <= 150,
-                  "range-error": localVolume > 150,
-                })}
-                onChange={(e) => setVolume(parseInt(e.target.value, 10))}
-              />
-              <span
-                className={clsx("text-sm ml-2", {
-                  "text-warning": localVolume > 100 && localVolume <= 150,
-                  "text-error": localVolume > 150,
-                })}
-              >
-                {localVolume} %
-              </span>
-            </div>
-            <div className="text-xs text-gray-400">
-              {localVolume > 100 && localVolume <= 150
-                ? "我说你耳朵聋，你听不见吗？"
-                : localVolume > 150
-                  ? "这么小声还想开军舰？"
-                  : localVolume === 0
-                    ? "一个猜歌比赛你不开声音，你是不是*开了*？"
-                    : "这样的声音大小合适吗？听得见吗？"}
-            </div>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>close</button>
-        </form>
-      </dialog>
+      <SettingDialog
+        dialogRef={settingDialogRef}
+        theme={theme}
+        setTheme={setTheme}
+        localVolume={localVolume}
+        setVolume={setVolume}
+      />
 
-      {/* 房主确认正确答案弹窗 */}
-      <dialog ref={judgingDialogRef} className="modal">
-        <div className="modal-box w-11/12 max-w-4xl">
-          <h2 className="font-bold text-2xl">确认正确答案</h2>
+      <JudgingDialog
+        dialogRef={judgingDialogRef}
+        confirmAnswerDialogRef={confirmAnswerDialogRef}
+        currentSong={currentSong}
+        tagGroups={tagGroups}
+        selectedTags={selectedTags}
+        selectedDescriptions={selectedDescriptions}
+        historyTagIds={historyTagIds}
+        referenceDescriptions={referenceDescriptions}
+        playerDescriptions={playerDescriptions}
+        onSelectTag={handleSelectJudgingTag}
+        onToggleDescription={handleToggleDescription}
+      />
 
-          {/* 曲目信息 */}
-          {currentSong && (
-            <SongInfoCard
-              songInfo={currentSong}
-              isJudging={true}
-              compact={false}
-              clickable={true}
-              onClick={() => {
-                if (currentSong.platformUrl) {
-                  window.open(currentSong.platformUrl, "_blank");
-                }
-              }}
-              className="my-4"
-              showAlbum={true}
-              showPlatformHint={true}
-            />
-          )}
+      <ConfirmAnswerDialog
+        dialogRef={confirmAnswerDialogRef}
+        isWsDisconnected={isWsDisconnected}
+        onSubmit={handleJudgeSubmit}
+      />
 
-          {/* TagGroup选择 */}
-          <div className="mb-4">
-            <h3 className="text-lg font-semibold mb-3">选择正确标签</h3>
-            <TagGroupSelector
-              tagGroups={tagGroups}
-              selectedTags={selectedTags}
-              onSelectTag={handleSelectJudgingTag}
-              highlightTagIds={historyTagIds}
-              readOnly={false}
-              showHeader={false}
-              showEmptyState={true}
-              emptyStateText="暂无可选标签分组"
-            />
-          </div>
+      <RemovePlayerDialog
+        dialogRef={removePlayerDialogRef}
+        isWsDisconnected={isWsDisconnected}
+        onConfirm={confirmRemovePlayer}
+      />
 
-          {/* 参考精确描述 */}
-          {referenceDescriptions.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold mb-3">参考精确描述</h3>
-              <div className="card bg-base-200 p-4">
-                <ul className="list-disc list-inside space-y-2">
-                  {referenceDescriptions.map((desc, index) => (
-                    <li key={index} className="text-sm">
-                      {desc}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          )}
+      <AnswerModal
+        dialogRef={answerModalRef}
+        isOpen={isAnswerModalOpen && !isAnswerModalMinimized}
+        tagGroups={tagGroups}
+        selectedTags={selectedTagByGroup}
+        description={description}
+        isWsDisconnected={isWsDisconnected}
+        onSelectTag={selectGroupTag}
+        onDescriptionChange={setDescription}
+        onToggleMinimize={toggleAnswerModal}
+        onSubmit={handleSubmitAnswer}
+      />
 
-          {/* 玩家精确描述 */}
-          {playerDescriptions.length > 0 && (
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold mb-3">抢答者精确描述</h3>
-              <div className="space-y-3">
-                {playerDescriptions.map((playerDesc) => (
-                  <div key={playerDesc.id} className="card bg-base-200 p-4">
-                    <div className="flex items-start gap-3">
-                      <input
-                        type="checkbox"
-                        className="checkbox checkbox-primary mt-1"
-                        checked={selectedDescriptions.includes(playerDesc.id)}
-                        onChange={() => handleToggleDescription(playerDesc.id)}
-                      />
-                      <div>
-                        <div className="font-semibold">
-                          {playerDesc.username}
-                        </div>
-                        <div className="text-sm opacity-80 mt-1">
-                          {playerDesc.description}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+      <AnswerModalFloatingButton
+        isVisible={isAnswerModalOpen && isAnswerModalMinimized}
+        onClick={toggleAnswerModal}
+      />
 
-          {/* 操作按钮 */}
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => judgingDialogRef.current?.close()}
-            >
-              暂时隐藏
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => confirmAnswerDialogRef.current?.showModal()}
-            >
-              确认答案
-            </button>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>关闭</button>
-        </form>
-      </dialog>
-
-      {/* 确认答案弹窗 */}
-      <dialog ref={confirmAnswerDialogRef} className="modal">
-        <div className="modal-box max-w-md">
-          <h3 className="font-bold text-lg">确认提交答案</h3>
-          <p className="py-4">确定要提交当前选择的答案吗？提交后将进行评分。</p>
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => confirmAnswerDialogRef.current?.close()}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={isWsDisconnected}
-              onClick={handleJudgeSubmit}
-            >
-              确认提交
-            </button>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>关闭</button>
-        </form>
-      </dialog>
-
-      {/* 移除玩家确认弹窗 */}
-      <dialog ref={removePlayerDialogRef} className="modal">
-        <div className="modal-box max-w-md">
-          <h3 className="font-bold text-lg">确认移除玩家</h3>
-          <p className="py-4">确定要将该玩家移出房间吗？</p>
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={() => removePlayerDialogRef.current?.close()}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              className="btn btn-warning"
-              disabled={isWsDisconnected}
-              onClick={confirmRemovePlayer}
-            >
-              确认移除
-            </button>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>关闭</button>
-        </form>
-      </dialog>
-
-      {/* 答题弹窗 */}
-      <dialog
-        ref={answerModalRef}
-        className="modal"
-        open={isAnswerModalOpen && !isAnswerModalMinimized}
-      >
-        <div className="modal-box w-11/12 max-w-4xl">
-          <h2 className="font-bold text-2xl">答题</h2>
-          <div className="divider mt-0.5 mb-4"></div>
-
-          <TagGroupSelector
-            tagGroups={tagGroups}
-            selectedTags={selectedTagByGroup}
-            onSelectTag={selectGroupTag}
-            showHeader={true}
-            headerText="选择 Tags"
-            className="mb-6"
-          />
-
-          {/* 精确描述输入框 */}
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-2">精确描述</h3>
-            <textarea
-              className="textarea textarea-bordered w-full"
-              placeholder="请输入精确描述..."
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            ></textarea>
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={toggleAnswerModal}
-            >
-              暂时隐藏
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={isWsDisconnected}
-              onClick={handleSubmitAnswer}
-            >
-              提交答案
-            </button>
-          </div>
-        </div>
-        <form method="dialog" className="modal-backdrop">
-          <button>关闭</button>
-        </form>
-      </dialog>
-
-      {/* 悬浮按钮（当弹窗被最小化时显示） */}
-      {isAnswerModalOpen && isAnswerModalMinimized && (
-        <button
-          type="button"
-          className="fixed bottom-6 right-6 btn btn-primary btn-circle h-16 w-16 shadow-lg"
-          onClick={toggleAnswerModal}
-        >
-          <Icon
-            icon="heroicons:clipboard-question-mark"
-            width={24}
-            height={24}
-          />
-        </button>
-      )}
+      <RoundSummaryDialog
+        isOpen={isRoundSummaryOpen && roundSummary !== null}
+        roundScore={roundSummary?.roundScore ?? 0}
+        rankChange={roundSummary?.rankChange ?? null}
+        currentRank={roundSummary?.currentRank ?? null}
+        onClose={() => setIsRoundSummaryOpen(false)}
+      />
     </div>
   );
 }
