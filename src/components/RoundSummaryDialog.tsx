@@ -27,6 +27,7 @@ interface RoundSummaryDialogProps {
 
 const DEFAULT_AUTO_CLOSE_MS = 5000;
 const CLOSE_ANIMATION_MS = 220;
+type DialogPhase = "hidden" | "open" | "closing";
 
 const formatRoundScore = (score: number) => {
   if (score > 0) {
@@ -58,103 +59,8 @@ const renderRankChange = (rankChange: number | null) => {
 };
 
 interface CountdownState {
-  deadline: number | null;
   remainingMs: number;
   isPaused: boolean;
-  isVisible: boolean;
-}
-
-function useCountdown(onExpire: () => void) {
-  const [state, setState] = useState<CountdownState>({
-    deadline: null,
-    remainingMs: 0,
-    isPaused: false,
-    isVisible: false,
-  });
-
-  const deadlineRef = useRef<number | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const onExpireRef = useRef(onExpire);
-
-  useEffect(() => {
-    onExpireRef.current = onExpire;
-  }, [onExpire]);
-
-  const stopCountdown = useCallback(() => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    deadlineRef.current = null;
-  }, []);
-
-  const start = useCallback((durationMs: number) => {
-    const tick = () => {
-      if (deadlineRef.current === null) return;
-      const remaining = deadlineRef.current - performance.now();
-      if (remaining <= 0) {
-        setState((s) => ({ ...s, remainingMs: 0 }));
-        deadlineRef.current = null;
-        return;
-      }
-      setState((s) => ({ ...s, remainingMs: remaining }));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    deadlineRef.current = performance.now() + durationMs;
-    setState({
-      deadline: deadlineRef.current,
-      remainingMs: durationMs,
-      isPaused: false,
-      isVisible: true,
-    });
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const pause = useCallback(() => {
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    deadlineRef.current = null;
-    setState((s) => ({ ...s, isPaused: true }));
-  }, []);
-
-  const resume = useCallback((remainingMs: number) => {
-    const tick = () => {
-      if (deadlineRef.current === null) return;
-      const remaining = deadlineRef.current - performance.now();
-      if (remaining <= 0) {
-        setState((s) => ({ ...s, remainingMs: 0 }));
-        deadlineRef.current = null;
-        return;
-      }
-      setState((s) => ({ ...s, remainingMs: remaining }));
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    deadlineRef.current = performance.now() + remainingMs;
-    setState((s) => ({ ...s, isPaused: false, deadline: deadlineRef.current }));
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  const close = useCallback(() => {
-    stopCountdown();
-    setState((s) => ({ ...s, isVisible: false }));
-  }, [stopCountdown]);
-
-  useEffect(() => {
-    if (state.remainingMs <= 0 && state.isVisible) {
-      stopCountdown();
-      onExpireRef.current();
-    }
-  }, [state.remainingMs, state.isVisible, stopCountdown]);
-
-  useEffect(() => {
-    return stopCountdown;
-  }, [stopCountdown]);
-
-  return { state, start, pause, resume, close };
 }
 
 export function RoundSummaryDialog({
@@ -170,71 +76,182 @@ export function RoundSummaryDialog({
 }: RoundSummaryDialogProps) {
   const hasUserInteracted = useRef(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const wasOpenRef = useRef(isOpen);
-  const autoCloseMsRef = useRef(autoCloseMs);
+  const onCloseRef = useRef(onClose);
+  const phaseRef = useRef<DialogPhase>(isOpen ? "open" : "hidden");
+  const remainingRef = useRef(autoCloseMs);
+  const deadlineRef = useRef<number | null>(null);
+  const rafRef = useRef<number | null>(null);
   const closeTimerRef = useRef<number | null>(null);
-  const [isClosing, setIsClosing] = useState(false);
+  const [phase, setPhase] = useState<DialogPhase>(isOpen ? "open" : "hidden");
+  const [countdownState, setCountdownState] = useState<CountdownState>({
+    remainingMs: autoCloseMs,
+    isPaused: false,
+  });
 
-  const { state: countdownState, start, pause, resume, close } = useCountdown(onClose);
+  const stopRaf = useCallback(() => {
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    deadlineRef.current = null;
+  }, []);
+
+  const stopCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
+  const beginClosingAnimation = useCallback(() => {
+    if (phaseRef.current === "hidden" || phaseRef.current === "closing") {
+      return;
+    }
+    stopRaf();
+    setCountdownState((s) => ({ ...s, isPaused: true }));
+    phaseRef.current = "closing";
+    setPhase("closing");
+    stopCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      phaseRef.current = "hidden";
+      setPhase("hidden");
+      remainingRef.current = 0;
+      setCountdownState({ remainingMs: 0, isPaused: false });
+      closeTimerRef.current = null;
+    }, CLOSE_ANIMATION_MS);
+  }, [stopCloseTimer, stopRaf]);
+
+  const requestClose = useCallback(() => {
+    beginClosingAnimation();
+    onCloseRef.current();
+  }, [beginClosingAnimation]);
+
+  const startCountdown = useCallback((durationMs: number) => {
+    stopRaf();
+
+    if (durationMs <= 0) {
+      remainingRef.current = 0;
+      setCountdownState({ remainingMs: 0, isPaused: false });
+      return;
+    }
+
+    const tick = () => {
+      if (deadlineRef.current === null) {
+        return;
+      }
+
+      const remaining = Math.max(0, deadlineRef.current - performance.now());
+      remainingRef.current = remaining;
+      setCountdownState((s) => ({ ...s, remainingMs: remaining }));
+
+      if (remaining <= 0) {
+        stopRaf();
+        requestClose();
+        return;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    remainingRef.current = durationMs;
+    deadlineRef.current = performance.now() + durationMs;
+    setCountdownState({ remainingMs: durationMs, isPaused: false });
+    rafRef.current = requestAnimationFrame(tick);
+  }, [requestClose, stopRaf]);
+
+  const pauseCountdown = useCallback(() => {
+    if (phaseRef.current !== "open") {
+      return;
+    }
+
+    const nextRemaining = deadlineRef.current === null
+      ? countdownState.remainingMs
+      : Math.max(0, deadlineRef.current - performance.now());
+
+    remainingRef.current = nextRemaining;
+    stopRaf();
+    setCountdownState((s) => ({ ...s, remainingMs: nextRemaining, isPaused: true }));
+  }, [countdownState.remainingMs, stopRaf]);
+
+  const resumeCountdown = useCallback(() => {
+    if (phaseRef.current !== "open") {
+      return;
+    }
+
+    const remaining = remainingRef.current;
+    if (remaining <= 0) {
+      return;
+    }
+
+    const tick = () => {
+      if (deadlineRef.current === null) {
+        return;
+      }
+
+      const nextRemaining = Math.max(0, deadlineRef.current - performance.now());
+      remainingRef.current = nextRemaining;
+      setCountdownState((s) => ({ ...s, remainingMs: nextRemaining }));
+
+      if (nextRemaining <= 0) {
+        stopRaf();
+        requestClose();
+        return;
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    stopRaf();
+    deadlineRef.current = performance.now() + remaining;
+    setCountdownState((s) => ({ ...s, isPaused: false }));
+    rafRef.current = requestAnimationFrame(tick);
+  }, [requestClose, stopRaf]);
 
   useEffect(() => {
-    autoCloseMsRef.current = autoCloseMs;
-  }, [autoCloseMs]);
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
+      stopRaf();
+      stopCloseTimer();
     };
-  }, []);
+  }, [stopRaf, stopCloseTimer]);
 
   useEffect(() => {
-    if (isOpen && !wasOpenRef.current) {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-      setIsClosing(false);
+    if (isOpen) {
+      stopCloseTimer();
+      phaseRef.current = "open";
+      setPhase("open");
       hasUserInteracted.current = false;
-      start(autoCloseMsRef.current);
-    } else if (!isOpen && wasOpenRef.current) {
-      pause();
-      setIsClosing(true);
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-      }
-      closeTimerRef.current = window.setTimeout(() => {
-        setIsClosing(false);
-        close();
-        closeTimerRef.current = null;
-      }, CLOSE_ANIMATION_MS);
+      startCountdown(autoCloseMs);
+      return;
     }
-    wasOpenRef.current = isOpen;
-  }, [isOpen, start, close, pause]);
+
+    beginClosingAnimation();
+  }, [isOpen, autoCloseMs, beginClosingAnimation, startCountdown, stopCloseTimer]);
 
   const handleMouseEnter = useCallback(() => {
     if (hasUserInteracted.current) {
-      pause();
+      pauseCountdown();
     }
-  }, [pause]);
+  }, [pauseCountdown]);
 
   const handleMouseLeave = useCallback(() => {
-    if (!isOpen || isClosing || countdownState.remainingMs <= 0) {
+    if (!isOpen || phase !== "open" || !hasUserInteracted.current || countdownState.remainingMs <= 0) {
       return;
     }
-    resume(countdownState.remainingMs);
-  }, [isOpen, isClosing, resume, countdownState.remainingMs]);
+    resumeCountdown();
+  }, [countdownState.remainingMs, isOpen, phase, resumeCountdown]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!hasUserInteracted.current) {
       hasUserInteracted.current = true;
       if (dialogRef.current?.contains(e.target as Node)) {
-        pause();
+        pauseCountdown();
       }
     }
-  }, [pause]);
+  }, [pauseCountdown]);
 
   const rankChangeDisplay = renderRankChange(rankChange);
 
@@ -246,19 +263,19 @@ export function RoundSummaryDialog({
     ? Math.max(0, Math.min(100, (countdownState.remainingMs / autoCloseMs) * 100))
     : 0;
 
-  if (!countdownState.isVisible) {
+  if (phase === "hidden") {
     return null;
   }
 
   return (
     <dialog
       ref={dialogRef}
-      className={`modal ${isOpen || isClosing ? "modal-open" : ""}`}
-      open={isOpen || isClosing}
+      className="modal modal-open"
+      open
       onMouseMove={handleMouseMove}
     >
       <div
-        className={`modal-box max-w-md relative overflow-hidden p-0 ${isClosing ? "motion-safe:animate-[buzz-fade-out_220ms_ease-in]" : "motion-safe:animate-[buzz-pop_220ms_ease-out]"}`}
+        className={`modal-box max-w-md relative overflow-hidden p-0 ${phase === "closing" ? "motion-safe:animate-[buzz-fade-out_220ms_ease-in_forwards]" : "motion-safe:animate-[buzz-pop_220ms_ease-out]"}`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
@@ -267,12 +284,17 @@ export function RoundSummaryDialog({
             className="h-full bg-primary"
             style={{
               width: `${progressPercent}%`,
-              transition: "width 1ms linear",
+              transition: "none",
             }}
           />
         </div>
 
         <style>{`
+          @keyframes buzz-pop {
+            0% { opacity: 0; transform: scale(0.97); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+
           @keyframes buzz-fade-out {
             0% { opacity: 1; transform: scale(1); }
             100% { opacity: 0; transform: scale(0.95); }
@@ -355,14 +377,14 @@ export function RoundSummaryDialog({
           )}
 
           <div className="modal-action">
-            <button type="button" className="btn btn-primary" onClick={onClose}>
+            <button type="button" className="btn btn-primary" onClick={requestClose}>
               确定
             </button>
           </div>
         </div>
       </div>
       <form method="dialog" className="modal-backdrop">
-        <button onClick={onClose}>关闭</button>
+        <button type="button" onClick={requestClose}>关闭</button>
       </form>
     </dialog>
   );
