@@ -39,6 +39,7 @@ const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 20;
 const CANVAS_INIT_DELAY_MS = 0;
+const PRELOAD_DEDUP_WINDOW_MS = 3000;
 
 const buildWsUrl = (roomId: string) => {
   const encodedRoomId = encodeURIComponent(roomId);
@@ -51,6 +52,23 @@ const buildWsUrl = (roomId: string) => {
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   url.pathname = `/ws/${encodedRoomId}/watch`;
   return url.toString();
+};
+
+const getActiveAnswerQueue = (
+  queue: AnswerQueueItem[],
+  answerQueueTailPlayerId: number | null,
+) => {
+  if (answerQueueTailPlayerId === null) {
+    return queue;
+  }
+
+  const tailIndex = queue.findIndex(
+    (item) => item.player_id === answerQueueTailPlayerId,
+  );
+  if (tailIndex < 0 || tailIndex + 1 >= queue.length) {
+    return [];
+  }
+  return queue.slice(tailIndex + 1);
 };
 
 function SpectatorPage() {
@@ -116,6 +134,7 @@ function SpectatorPage() {
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
   const shouldForcePlaybackResyncRef = useRef<boolean>(false);
+  const recentPreloadByUrlRef = useRef<Record<string, number>>({});
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasParentRef = useRef<HTMLDivElement | null>(null);
@@ -148,6 +167,21 @@ function SpectatorPage() {
       return a.id - b.id;
     });
   }, [answerOrderByUserId, onlinePlayers]);
+
+  const buzzedPlayerIds = useMemo(() => {
+    const queue = roomState?.answer_queue ?? [];
+    const tailPlayerId = roomState?.answer_queue_tail_player_id ?? null;
+    if (tailPlayerId === null) {
+      return [];
+    }
+
+    const tailIndex = queue.findIndex((item) => item.player_id === tailPlayerId);
+    if (tailIndex < 0) {
+      return [];
+    }
+
+    return queue.slice(0, tailIndex + 1).map((item) => item.player_id);
+  }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
 
   const applyRemoteProgress = useCallback(
     (message: PlayControlMessage, force = false) => {
@@ -183,7 +217,7 @@ function SpectatorPage() {
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
 
-      if (shouldSeek) {
+      if (shouldSeek && !isPauseEvent) {
         const durationMs = audioRef.current.durationMs;
         const clamped =
           durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
@@ -209,16 +243,22 @@ function SpectatorPage() {
     }
   }, []);
 
-  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+  const syncAnswerQueueState = useCallback((
+    queue: AnswerQueueItem[],
+    answerQueueTailPlayerId: number | null,
+  ) => {
+    const activeQueue = getActiveAnswerQueue(queue, answerQueueTailPlayerId);
+
     setAnswerOrderByUserId(
-      queue.reduce<Record<number, number>>((acc, item, index) => {
+      activeQueue.reduce<Record<number, number>>((acc, item, index) => {
         const order = item.order ?? index + 1;
         acc[item.player_id] = order;
         return acc;
       }, {}),
     );
 
-    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    const answeringPlayer = activeQueue.find((item) => item.is_answering)
+      ?.player_id ?? null;
     setCurrentAnsweringPlayer(answeringPlayer);
 
     const latestRoomState = gameStore.getState().roomState;
@@ -226,6 +266,7 @@ function SpectatorPage() {
       gameStore.getState().setRoomState({
         ...latestRoomState,
         answer_queue: queue,
+        answer_queue_tail_player_id: answerQueueTailPlayerId,
       });
     }
   }, []);
@@ -339,6 +380,7 @@ function SpectatorPage() {
           // 玩家和队列
           players: payload.players,
           answer_queue: payload.answer_queue,
+          answer_queue_tail_player_id: payload.answer_queue_tail_player_id,
           round_scored: payload.round_scored ?? false,
           round_answers: payload.round_answers ?? [],
 
@@ -360,67 +402,8 @@ function SpectatorPage() {
 
         gameStore.getState().setRoomState(nextRoomState);
 
-        // 同步音频播放器状态
-        const playbackStatus = payload.playback_status;
-        const audioPlayer = audioRef.current;
-        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
-        let didLoadOrRebindAudio = false;
-
-        if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
-          try {
-            // 检查是否需要切换音频URL
-            const newAudioUrl = playbackStatus.audio_url;
-            if (
-              newAudioUrl &&
-              (shouldForcePlaybackResync ||
-                newAudioUrl !== currentAudioUrlRef.current)
-            ) {
-              // 切换音频源
-              await audioPlayer.preload(newAudioUrl);
-              await audioPlayer.playUrlAsStream(newAudioUrl, false);
-              currentAudioUrlRef.current = newAudioUrl;
-              setCurrentAudioUrl(newAudioUrl);
-              didLoadOrRebindAudio = true;
-            }
-
-            // 创建伪PlayControlMessage用于applyRemoteProgress
-            const pseudoMessage = {
-              event:
-                playbackStatus.play_state === "paused"
-                  ? GameEventId.PAUSE
-                  : GameEventId.PLAY,
-              ts: playbackStatus.updated_at,
-              data: {
-                progress_ms: playbackStatus.progress_ms,
-                offset_ts: playbackStatus.offset_ts,
-                audio_url: playbackStatus.audio_url,
-              },
-            } as PlayControlMessage;
-
-            // 强制同步进度
-            applyRemoteProgress(pseudoMessage, true);
-
-            // 二次校准：等待 canplaythrough 后再按最新时钟偏移重新对齐
-            if (didLoadOrRebindAudio) {
-              await audioPlayer.waitForCanPlayThrough();
-              applyRemoteProgress(pseudoMessage, true);
-            }
-
-            // 同步播放状态
-            if (playbackStatus.play_state === "playing") {
-              void audioPlayer.resume();
-            } else if (playbackStatus.play_state === "paused") {
-              void audioPlayer.pause();
-            }
-
-            shouldForcePlaybackResyncRef.current = false;
-          } catch (error) {
-            console.error("Failed to sync audio playback:", error);
-            // 音频同步失败，但继续其他初始化
-          }
-        }
-
         // 初始化积分表（后端ROOM_STATE中的scores为累计明细，前端展示总分）
+        // 注意：这些更新必须在音频同步之前执行，确保即使音频同步失败也能更新关键状态
         const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
           (acc, item) => {
             const prev = acc[item.player_id] ?? 0;
@@ -440,9 +423,11 @@ function SpectatorPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
         setOnlinePlayers(payload.players);
-        syncAnswerQueueState(payload.answer_queue);
+        syncAnswerQueueState(
+          payload.answer_queue,
+          payload.answer_queue_tail_player_id,
+        );
         setPlayerAnswers(
           (payload.round_answers ?? []).map((answer) => ({
             playerId: answer.player_id,
@@ -454,6 +439,59 @@ function SpectatorPage() {
         );
 
         setTagGroups(payload.tag_groups);
+
+        // 同步音频播放器状态（此操作失败不应阻止关键状态更新）
+        const playbackStatus = payload.playback_status;
+        const audioPlayer = audioRef.current;
+        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
+        let didLoadOrRebindAudio = false;
+
+        if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
+          try {
+            const newAudioUrl = playbackStatus.audio_url;
+            if (
+              newAudioUrl &&
+              (shouldForcePlaybackResync ||
+                newAudioUrl !== currentAudioUrlRef.current)
+            ) {
+              await audioPlayer.preload(newAudioUrl);
+              await audioPlayer.playUrlAsStream(newAudioUrl, false);
+              currentAudioUrlRef.current = newAudioUrl;
+              setCurrentAudioUrl(newAudioUrl);
+              didLoadOrRebindAudio = true;
+            }
+
+            const pseudoMessage = {
+              event:
+                playbackStatus.play_state === "paused"
+                  ? GameEventId.PAUSE
+                  : GameEventId.PLAY,
+              ts: playbackStatus.updated_at,
+              data: {
+                progress_ms: playbackStatus.progress_ms,
+                offset_ts: playbackStatus.offset_ts,
+                audio_url: playbackStatus.audio_url,
+              },
+            } as PlayControlMessage;
+
+            applyRemoteProgress(pseudoMessage, true);
+
+            if (didLoadOrRebindAudio) {
+              await audioPlayer.waitForCanPlayThrough();
+              applyRemoteProgress(pseudoMessage, true);
+            }
+
+            if (playbackStatus.play_state === "playing") {
+              void audioPlayer.resume();
+            } else if (playbackStatus.play_state === "paused") {
+              void audioPlayer.pause();
+            }
+
+            shouldForcePlaybackResyncRef.current = false;
+          } catch (error) {
+            console.error("Failed to sync audio playback:", error);
+          }
+        }
       },
     );
     wsRef.current.onJsonEvent<PlayControlMessage>(
@@ -469,6 +507,21 @@ function SpectatorPage() {
     wsRef.current.onJsonEvent<PlayControlMessage>(
       GameEventId.PLAY,
       async (message) => {
+        const audioUrl = message.data.audio_url;
+        if (audioRef.current && audioUrl) {
+          const currentUrl = audioRef.current.getCurrentUrl?.();
+          const hasAudioElement = audioRef.current.hasAudioElement?.();
+          if (!hasAudioElement || currentUrl !== audioUrl) {
+            if (audioRef.current.isPreloaded?.(audioUrl)) {
+              await audioRef.current.usePreloadedAudio(audioUrl, false);
+            } else {
+              await audioRef.current.playUrlAsStream(audioUrl, false);
+            }
+            currentAudioUrlRef.current = audioUrl;
+            setCurrentAudioUrl(audioUrl);
+          }
+        }
+
         const nextPlaybackStatus = buildPlaybackStatusFromPlayControl(message);
         if (nextPlaybackStatus) {
           syncPlaybackStatusToRoomState(nextPlaybackStatus);
@@ -490,7 +543,7 @@ function SpectatorPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
-      syncAnswerQueueState([]);
+      syncAnswerQueueState([], null);
     });
 
     wsRef.current.onJsonEvent<AttemptAnswerMessage>(
@@ -523,12 +576,15 @@ function SpectatorPage() {
     wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
       GameEventId.CLEAR_ANSWER_QUEUE,
       () => {
-        syncAnswerQueueState([]);
+        syncAnswerQueueState([], null);
       },
     );
 
     wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
-      syncAnswerQueueState(message.data?.queue ?? []);
+      syncAnswerQueueState(
+        message.data?.queue ?? [],
+        message.data?.answer_queue_tail_player_id ?? null,
+      );
     });
 
     wsRef.current.onJsonEvent<TagGroupMessage>(GameEventId.TAG_GROUP, (message) => {
@@ -583,36 +639,55 @@ function SpectatorPage() {
           latestPlayers.find((player) => player.id === playerIdNum)?.username ??
           `玩家${playerIdNum}`;
 
+        const existingRoundAnswer = latestRoomState?.round_answers?.find(
+          (a) => a.player_id === playerIdNum,
+        );
+        const fallbackOrder = existingRoundAnswer?.order ?? (latestRoomState?.round_answers?.length ?? 0) + 1;
+        const nextOrder = orderFromQueue ?? fallbackOrder;
+
+        const newPlayerAnswer = {
+          playerId: playerIdNum,
+          username: playerName,
+          answers: selectedAnswerMap,
+          description: descriptionText,
+          order: nextOrder,
+        };
+
         setPlayerAnswers((prev) => {
           const existing = prev.find((item) => item.playerId === playerIdNum);
-          const fallbackOrder = existing?.order ?? prev.length + 1;
-          const nextOrder = orderFromQueue ?? fallbackOrder;
-
           if (existing) {
             return prev.map((item) =>
-              item.playerId === playerIdNum
-                ? {
-                    ...item,
-                    username: playerName,
-                    answers: selectedAnswerMap,
-                    description: descriptionText,
-                    order: nextOrder,
-                  }
-                : item,
+              item.playerId === playerIdNum ? newPlayerAnswer : item,
             );
           }
-
-          return [
-            ...prev,
-            {
-              playerId: playerIdNum,
-              username: playerName,
-              answers: selectedAnswerMap,
-              description: descriptionText,
-              order: nextOrder,
-            },
-          ];
+          return [...prev, newPlayerAnswer];
         });
+
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          const updatedRoundAnswers = [...(currentRoomState.round_answers ?? [])];
+          const existingIndex = updatedRoundAnswers.findIndex(
+            (a) => a.player_id === playerIdNum,
+          );
+          const roundAnswerItem = {
+            player_id: playerIdNum,
+            username: playerName,
+            answers: selectedAnswerMap as Record<number, number>,
+            description: descriptionText,
+            order: nextOrder,
+          };
+
+          if (existingIndex >= 0) {
+            updatedRoundAnswers[existingIndex] = roundAnswerItem;
+          } else {
+            updatedRoundAnswers.push(roundAnswerItem);
+          }
+
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            round_answers: updatedRoundAnswers,
+          });
+        }
       },
     );
 
@@ -896,8 +971,19 @@ function SpectatorPage() {
       GameEventId.PRELOAD_AUDIO,
       async (message) => {
         const { audio_url } = message.data;
-        if (audio_url && audioRef.current) {
+        if (!audio_url || !audioRef.current) {
+          return;
+        }
+
+        const now = Date.now();
+        const lastPreloadTs = recentPreloadByUrlRef.current[audio_url] ?? 0;
+        const shouldPreload =
+          now - lastPreloadTs >= PRELOAD_DEDUP_WINDOW_MS &&
+          audio_url !== currentAudioUrlRef.current;
+
+        if (shouldPreload) {
           try {
+            recentPreloadByUrlRef.current[audio_url] = now;
             await audioRef.current.preload(audio_url);
             console.log(`Audio preloaded: ${audio_url}`);
           } catch (error) {
@@ -1120,6 +1206,7 @@ function SpectatorPage() {
               {sortedOnlinePlayers.length > 0 ? (
                 sortedOnlinePlayers.map((player) => {
                   const order = answerOrderByUserId[player.id];
+                  const hasBuzzed = buzzedPlayerIds.includes(player.id);
                   return (
                     <li
                       key={player.id}
@@ -1133,6 +1220,7 @@ function SpectatorPage() {
                           order={order}
                           activate={typeof order === "number"}
                           answering={currentAnsweringPlayer === player.id}
+                          hasBuzzed={hasBuzzed}
                           isSelf={false}
                           online={player.online}
                         />

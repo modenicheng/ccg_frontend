@@ -69,7 +69,7 @@ const VOLUME_HOTKEY_STEP = 5;
 const VOLUME_TOAST_HIDE_DELAY_MS = 3000;
 const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
 const ROOM_ID_COPY_FEEDBACK_MS = 1800;
-const ROUND_SUMMARY_AUTO_CLOSE_MS = 4000;
+const ROUND_SUMMARY_AUTO_CLOSE_MS = 8000;
 
 let domProgressPercent = 0;
 
@@ -82,6 +82,23 @@ const logAudioTrigger = (
   }
   const ts = Date.now();
   console.debug(`[AUDIO_TRIGGER] source=${source} url=${url} ts=${ts}`);
+};
+
+const getActiveAnswerQueue = (
+  queue: AnswerQueueItem[],
+  answerQueueTailPlayerId: number | null,
+) => {
+  if (answerQueueTailPlayerId === null) {
+    return queue;
+  }
+
+  const tailIndex = queue.findIndex(
+    (item) => item.player_id === answerQueueTailPlayerId,
+  );
+  if (tailIndex < 0 || tailIndex + 1 >= queue.length) {
+    return [];
+  }
+  return queue.slice(tailIndex + 1);
 };
 
 const buildWsUrl = (roomId: string, token: string | null) => {
@@ -344,38 +361,12 @@ function RoomPage() {
   const volumeToastHideTimerRef = useRef<number | null>(null);
   const volumeToastExitTimerRef = useRef<number | null>(null);
   const roomIdCopyTimerRef = useRef<number | null>(null);
-  const roundSummaryAutoCloseTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
   const isWsDisconnected = !isConnected;
 
   const closeRoundSummaryDialog = useCallback(() => {
-    if (roundSummaryAutoCloseTimerRef.current !== null) {
-      window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
-      roundSummaryAutoCloseTimerRef.current = null;
-    }
     setIsRoundSummaryOpen(false);
   }, []);
-
-  useEffect(() => {
-    if (!isRoundSummaryOpen || roundSummary === null) {
-      return;
-    }
-
-    if (roundSummaryAutoCloseTimerRef.current !== null) {
-      window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
-    }
-
-    roundSummaryAutoCloseTimerRef.current = window.setTimeout(() => {
-      closeRoundSummaryDialog();
-    }, ROUND_SUMMARY_AUTO_CLOSE_MS);
-
-    return () => {
-      if (roundSummaryAutoCloseTimerRef.current !== null) {
-        window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
-        roundSummaryAutoCloseTimerRef.current = null;
-      }
-    };
-  }, [closeRoundSummaryDialog, isRoundSummaryOpen, roundSummary]);
 
   // 窗口 focus 检测 - 用于控制音频音量（每个客户端独立处理）
   useEffect(() => {
@@ -438,26 +429,41 @@ function RoomPage() {
     [getCalibratedNow],
   );
 
-  const syncAnswerQueueState = useCallback((queue: AnswerQueueItem[]) => {
+  const syncAnswerQueueState = useCallback((
+    queue: AnswerQueueItem[],
+    answerQueueTailPlayerId: number | null,
+  ) => {
+    const activeQueue = getActiveAnswerQueue(queue, answerQueueTailPlayerId);
+
     setAnswerOrderByUserId(
-      queue.reduce<Record<number, number>>((acc, item, index) => {
+      activeQueue.reduce<Record<number, number>>((acc, item, index) => {
         const order = item.order ?? index + 1;
         acc[item.player_id] = order;
         return acc;
       }, {}),
     );
 
-    const answeringPlayer = queue.find((item) => item.is_answering)?.player_id ?? null;
+    const answeringPlayer = activeQueue.find((item) => item.is_answering)
+      ?.player_id ?? null;
     setCurrentAnsweringPlayer(answeringPlayer);
+
+    const currentUserId = userIdRef.current;
+    if (answeringPlayer === currentUserId) {
+      setIsAnswerModalOpen(true);
+      setIsAnswerModalMinimized(false);
+    } else {
+      setIsAnswerModalOpen(false);
+    }
 
     const latestRoomState = gameStore.getState().roomState;
     if (latestRoomState) {
       gameStore.getState().setRoomState({
         ...latestRoomState,
         answer_queue: queue,
+        answer_queue_tail_player_id: answerQueueTailPlayerId,
       });
     }
-  }, []);
+  }, [userIdRef]);
 
   const syncPlaybackStatusToRoomState = useCallback(
     (nextPlaybackStatus: PlaybackState) => {
@@ -590,6 +596,21 @@ function RoomPage() {
       return a.id - b.id;
     });
   }, [answerOrderByUserId, onlinePlayers]);
+
+  const buzzedPlayerIds = useMemo(() => {
+    const queue = roomState?.answer_queue ?? [];
+    const tailPlayerId = roomState?.answer_queue_tail_player_id ?? null;
+    if (tailPlayerId === null) {
+      return [];
+    }
+
+    const tailIndex = queue.findIndex((item) => item.player_id === tailPlayerId);
+    if (tailIndex < 0) {
+      return [];
+    }
+
+    return queue.slice(0, tailIndex + 1).map((item) => item.player_id);
+  }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
 
   const isCurrentPlayerInAnswerQueue = useMemo(() => {
     if (userId === null) {
@@ -1144,6 +1165,7 @@ function RoomPage() {
           // 玩家和队列
           players: payload.players,
           answer_queue: payload.answer_queue,
+          answer_queue_tail_player_id: payload.answer_queue_tail_player_id,
           round_scored: payload.round_scored ?? false,
           round_answers: payload.round_answers ?? [],
 
@@ -1165,90 +1187,8 @@ function RoomPage() {
 
         gameStore.getState().setRoomState(nextRoomState);
 
-        // 同步音频播放器状态
-        const playbackStatus = payload.playback_status;
-        const audioPlayer = audioRef.current;
-        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
-        let didLoadOrRebindAudio = false;
-
-        if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
-          try {
-            // 检查是否需要切换音频URL
-            const newAudioUrl = playbackStatus.audio_url;
-
-            // 1. 验证URL有效性
-            if (!newAudioUrl) {
-              console.warn("[ROOM_STATE_SYNC] Received empty audio_url from backend");
-              await reportAudioError(
-                "sync_failed",
-                "Received empty audio_url from ROOM_STATE",
-              );
-              return; // 停止本次同步
-            }
-
-            // 2. 切换音频URL（自动重试3次）
-            if (
-              shouldForcePlaybackResync ||
-              newAudioUrl !== currentAudioUrlRef.current
-            ) {
-              logAudioTrigger("ROOM_STATE", newAudioUrl);
-              const switchSuccess = await tryPlayUrlWithRetry(newAudioUrl, 3);
-              if (!switchSuccess) {
-                // reportAudioError 已在 tryPlayUrlWithRetry 内部调用
-                return; // 停止本次同步
-              }
-
-              currentAudioUrlRef.current = newAudioUrl;
-              setCurrentAudioUrl(newAudioUrl);
-              didLoadOrRebindAudio = true;
-            }
-
-            // 3. 同步进度和播放状态（仅在URL成功切换/未变化后）
-            const pseudoMessage = {
-              event:
-                playbackStatus.play_state === "paused"
-                  ? GameEventId.PAUSE
-                  : GameEventId.PLAY,
-              ts: playbackStatus.updated_at,
-              data: {
-                progress_ms: playbackStatus.progress_ms,
-                offset_ts: playbackStatus.offset_ts,
-                audio_url: playbackStatus.audio_url,
-              },
-            } as PlayControlMessage;
-
-            applyRemoteProgress(pseudoMessage, true);
-
-            // 二次校准：等待 canplaythrough 后再按最新时钟偏移重新对齐
-            if (didLoadOrRebindAudio) {
-              await audioPlayer.waitForCanPlayThrough();
-              applyRemoteProgress(pseudoMessage, true);
-            }
-
-            // 4. 同步播放状态
-            if (playbackStatus.play_state === "playing") {
-              await audioPlayer.resume();
-            } else if (playbackStatus.play_state === "paused") {
-              await audioPlayer.pause();
-            }
-
-            shouldForcePlaybackResyncRef.current = false;
-          } catch (error) {
-            console.error(
-              "[ROOM_STATE_SYNC] Failed to sync audio playback:",
-              error,
-            );
-            await reportAudioError(
-              "sync_failed",
-              parseErrorMessage(error, "音频同步失败"),
-            );
-            notifyAudioLoadError(
-              parseErrorMessage(error, "音频加载失败，请稍后重试"),
-            );
-          }
-        }
-
         // 初始化积分表（后端ROOM_STATE中的scores为累计明细，前端展示总分）
+        // 注意：这些更新必须在音频同步之前执行，确保即使音频同步失败也能更新关键状态
         const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
           (acc, item) => {
             const prev = acc[item.player_id] ?? 0;
@@ -1268,7 +1208,6 @@ function RoomPage() {
         // 更新本地状态
         const ownerName = ownerPlayer?.username || "-";
         setRoomOwner(ownerName);
-        // 显示所有玩家（包括离线的），后端会在对局开始后保留玩家但标记为离线
         setOnlinePlayers(payload.players);
         setAnswerOrderByUserId(
           payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
@@ -1278,9 +1217,10 @@ function RoomPage() {
             return acc;
           }, {}),
         );
-        // 房间任意状态都保留全部玩家，仅通过 online 字段展示在线状态
-        setOnlinePlayers(payload.players);
-        syncAnswerQueueState(payload.answer_queue);
+        syncAnswerQueueState(
+          payload.answer_queue,
+          payload.answer_queue_tail_player_id,
+        );
 
         setTagGroups(payload.tag_groups);
         setPlayerAnswers(
@@ -1301,6 +1241,80 @@ function RoomPage() {
             {},
           ),
         );
+
+        // 同步音频播放器状态（此操作失败不应阻止关键状态更新）
+        const playbackStatus = payload.playback_status;
+        const audioPlayer = audioRef.current;
+        const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
+        let didLoadOrRebindAudio = false;
+
+        if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
+          try {
+            const newAudioUrl = playbackStatus.audio_url;
+
+            if (!newAudioUrl) {
+              console.warn("[ROOM_STATE_SYNC] Received empty audio_url from backend");
+              await reportAudioError(
+                "sync_failed",
+                "Received empty audio_url from ROOM_STATE",
+              );
+            } else if (
+              shouldForcePlaybackResync ||
+              newAudioUrl !== currentAudioUrlRef.current
+            ) {
+              logAudioTrigger("ROOM_STATE", newAudioUrl);
+              const switchSuccess = await tryPlayUrlWithRetry(newAudioUrl, 3);
+
+              if (switchSuccess) {
+                currentAudioUrlRef.current = newAudioUrl;
+                setCurrentAudioUrl(newAudioUrl);
+                didLoadOrRebindAudio = true;
+              }
+            }
+
+            if (didLoadOrRebindAudio || currentAudioUrlRef.current === playbackStatus.audio_url) {
+              const pseudoMessage = {
+                event:
+                  playbackStatus.play_state === "paused"
+                    ? GameEventId.PAUSE
+                    : GameEventId.PLAY,
+                ts: playbackStatus.updated_at,
+                data: {
+                  progress_ms: playbackStatus.progress_ms,
+                  offset_ts: playbackStatus.offset_ts,
+                  audio_url: playbackStatus.audio_url,
+                },
+              } as PlayControlMessage;
+
+              applyRemoteProgress(pseudoMessage, true);
+
+              if (didLoadOrRebindAudio) {
+                await audioPlayer.waitForCanPlayThrough();
+                applyRemoteProgress(pseudoMessage, true);
+              }
+
+              if (playbackStatus.play_state === "playing") {
+                await audioPlayer.resume();
+              } else if (playbackStatus.play_state === "paused") {
+                await audioPlayer.pause();
+              }
+
+              shouldForcePlaybackResyncRef.current = false;
+            }
+          } catch (error) {
+            console.error(
+              "[ROOM_STATE_SYNC] Failed to sync audio playback:",
+              error,
+            );
+            await reportAudioError(
+              "sync_failed",
+              parseErrorMessage(error, "音频同步失败"),
+            );
+            notifyAudioLoadError(
+              parseErrorMessage(error, "音频加载失败，请稍后重试"),
+            );
+          }
+        }
       },
     );
     wsRef.current.onJsonEvent<PlayControlMessage>(
@@ -1462,36 +1476,55 @@ function RoomPage() {
           latestPlayers.find((player) => player.id === playerIdNum)?.username ??
           `玩家${playerIdNum}`;
 
+        const existingRoundAnswer = latestRoomState?.round_answers?.find(
+          (a) => a.player_id === playerIdNum,
+        );
+        const fallbackOrder = existingRoundAnswer?.order ?? (latestRoomState?.round_answers?.length ?? 0) + 1;
+        const nextOrder = orderFromQueue ?? fallbackOrder;
+
+        const newPlayerAnswer = {
+          playerId: playerIdNum,
+          username: playerName,
+          answers: selectedAnswerMap,
+          description: descriptionText,
+          order: nextOrder,
+        };
+
         setPlayerAnswers((prev) => {
           const existing = prev.find((item) => item.playerId === playerIdNum);
-          const fallbackOrder = existing?.order ?? prev.length + 1;
-          const nextOrder = orderFromQueue ?? fallbackOrder;
-
           if (existing) {
             return prev.map((item) =>
-              item.playerId === playerIdNum
-                ? {
-                    ...item,
-                    username: playerName,
-                    answers: selectedAnswerMap,
-                    description: descriptionText,
-                    order: nextOrder,
-                  }
-                : item,
+              item.playerId === playerIdNum ? newPlayerAnswer : item,
             );
           }
-
-          return [
-            ...prev,
-            {
-              playerId: playerIdNum,
-              username: playerName,
-              answers: selectedAnswerMap,
-              description: descriptionText,
-              order: nextOrder,
-            },
-          ];
+          return [...prev, newPlayerAnswer];
         });
+
+        const currentRoomState = gameStore.getState().roomState;
+        if (currentRoomState) {
+          const updatedRoundAnswers = [...(currentRoomState.round_answers ?? [])];
+          const existingIndex = updatedRoundAnswers.findIndex(
+            (a) => a.player_id === playerIdNum,
+          );
+          const roundAnswerItem = {
+            player_id: playerIdNum,
+            username: playerName,
+            answers: selectedAnswerMap as Record<number, number>,
+            description: descriptionText,
+            order: nextOrder,
+          };
+
+          if (existingIndex >= 0) {
+            updatedRoundAnswers[existingIndex] = roundAnswerItem;
+          } else {
+            updatedRoundAnswers.push(roundAnswerItem);
+          }
+
+          gameStore.getState().setRoomState({
+            ...currentRoomState,
+            round_answers: updatedRoundAnswers,
+          });
+        }
       },
     );
 
@@ -1501,7 +1534,7 @@ function RoomPage() {
       data: Record<string, never>;
     }>(GameEventId.SKIP_ROUND, () => {
       resetRoundTransientState();
-      syncAnswerQueueState([]);
+      syncAnswerQueueState([], null);
     });
 
     wsRef.current.onJsonEvent<{
@@ -1975,7 +2008,7 @@ function RoomPage() {
 
         // 4. 清除抢答队列状态
         setAnswerOrderByUserId({});
-        syncAnswerQueueState([]);
+        syncAnswerQueueState([], null);
 
         // 5. 清空玩家作答情况
         setPlayerAnswers([]);
@@ -2063,7 +2096,7 @@ function RoomPage() {
     wsRef.current.onJsonEvent<ClearAnswerQueueMessage>(
       GameEventId.CLEAR_ANSWER_QUEUE,
       () => {
-        syncAnswerQueueState([]);
+        syncAnswerQueueState([], null);
         console.log("Answer queue cleared");
       },
     );
@@ -2071,7 +2104,7 @@ function RoomPage() {
     // 处理抢答队列更新事件
     wsRef.current.onJsonEvent<AnswerQueueMessage>(GameEventId.ANSWER_QUEUE, (message) => {
       const queue = message.data?.queue ?? [];
-      syncAnswerQueueState(queue);
+      syncAnswerQueueState(queue, message.data?.answer_queue_tail_player_id ?? null);
       console.log("Answer queue updated:", queue);
     });
 
@@ -2545,10 +2578,6 @@ function RoomPage() {
         window.clearTimeout(roomIdCopyTimerRef.current);
         roomIdCopyTimerRef.current = null;
       }
-      if (roundSummaryAutoCloseTimerRef.current !== null) {
-        window.clearTimeout(roundSummaryAutoCloseTimerRef.current);
-        roundSummaryAutoCloseTimerRef.current = null;
-      }
     };
   }, []);
 
@@ -2724,6 +2753,7 @@ function RoomPage() {
         <PlayerList
           sortedOnlinePlayers={sortedOnlinePlayers}
           answerOrderByUserId={answerOrderByUserId}
+          buzzedPlayerIds={buzzedPlayerIds}
           currentAnsweringPlayer={currentAnsweringPlayer}
           userId={userId}
           isOwner={isOwner}
@@ -2805,6 +2835,7 @@ function RoomPage() {
         correctTags={lastJudgedAnswers?.correctTags ?? []}
         correctDescriptionIds={lastJudgedAnswers?.correctDescriptionIds ?? []}
         playerDescriptions={playerDescriptions}
+        autoCloseMs={ROUND_SUMMARY_AUTO_CLOSE_MS}
         onClose={closeRoundSummaryDialog}
       />
     </div>

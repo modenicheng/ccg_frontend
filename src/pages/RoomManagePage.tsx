@@ -76,6 +76,7 @@ function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
     song_start_range_percent: null,
     players: [], // full player objects not available
     answer_queue: [],
+    answer_queue_tail_player_id: null,
     round_scored: false,
     round_answers: [],
     tag_groups: [],

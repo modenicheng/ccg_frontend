@@ -11,6 +11,7 @@ interface PlayerEntry {
 interface PlayerListProps {
   sortedOnlinePlayers: PlayerEntry[];
   answerOrderByUserId: Record<number, number>;
+  buzzedPlayerIds: number[];
   currentAnsweringPlayer: number | null;
   userId: number | null;
   isOwner: boolean;
@@ -21,6 +22,7 @@ interface PlayerListProps {
 export function PlayerList({
   sortedOnlinePlayers,
   answerOrderByUserId,
+  buzzedPlayerIds,
   currentAnsweringPlayer,
   userId,
   isOwner,
@@ -46,6 +48,7 @@ export function PlayerList({
             sortedOnlinePlayers.map((player) => {
               const order = answerOrderByUserId[player.id];
               const isCurrentUser = userId !== null && player.id === userId;
+              const hasBuzzed = buzzedPlayerIds.includes(player.id);
               return (
                 <li
                   key={player.id}
@@ -59,6 +62,7 @@ export function PlayerList({
                       order={order}
                       activate={typeof order === "number"}
                       answering={currentAnsweringPlayer === player.id}
+                      hasBuzzed={hasBuzzed}
                       isSelf={isCurrentUser}
                       online={player.online}
                       showKickAction={isOwner && !isCurrentUser}

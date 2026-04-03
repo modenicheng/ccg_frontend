@@ -63,6 +63,7 @@ export interface RoomStateData {
   players: WsPlayer[];
   tag_groups: WsTagGroup[];
   answer_queue: AnswerQueueItem[];
+  answer_queue_tail_player_id: number | null;
   round_scored: boolean;
   round_answers: RoundAnswerItem[];
   playback_status: PlaybackState | null;
@@ -139,6 +140,7 @@ export interface YourTurnMessage {
 
 export interface AnswerQueueMessageData {
   queue: AnswerQueueItem[];
+  answer_queue_tail_player_id: number | null;
 }
 
 export interface AnswerQueueMessage {
@@ -314,6 +316,8 @@ export interface KickUserMessage {
 // 预加载音频数据
 export interface PreloadAudioData {
   audio_url: string;
+  progress_ms?: number;
+  offset_ts?: number | null;
 }
 
 // 预加载音频消息

@@ -129,21 +129,14 @@ export function JudgingDialog({
             className="btn btn-primary"
             disabled={
               isJudgingSubmitted ||
-              Object.values(selectedTags).some((v) => v === null) ||
-              (playerDescriptions.length > 0 &&
-                playerDescriptions.some((pd) => !selectedDescriptions.includes(pd.id)))
+              Object.values(selectedTags).some((v) => v === null)
             }
             onClick={() => {
               const hasAllTagsSelected = tagGroups.every(
                 (group) => selectedTags[group.id] !== null,
               );
-              const hasAllDescriptionsSelected =
-                playerDescriptions.length === 0 ||
-                playerDescriptions.every(
-                  (pd) => selectedDescriptions.includes(pd.id),
-                );
 
-              if (hasAllTagsSelected && hasAllDescriptionsSelected) {
+              if (hasAllTagsSelected) {
                 confirmAnswerDialogRef.current?.showModal();
               }
             }}

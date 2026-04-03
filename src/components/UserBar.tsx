@@ -6,6 +6,7 @@ type UserBarProps = {
   order?: number;
   activate?: boolean;
   answering?: boolean;
+  hasBuzzed?: boolean;
   isSelf?: boolean;
   online?: boolean;
   showKickAction?: boolean;
@@ -18,6 +19,7 @@ export const UserBar: React.FC<UserBarProps> = ({
   order,
   activate = false,
   answering = false,
+  hasBuzzed = false,
   isSelf = false,
   online = true,
   showKickAction = false,
@@ -31,6 +33,7 @@ export const UserBar: React.FC<UserBarProps> = ({
           "bg-primary": answering,
           "shadow-sm": activate,
           "bg-primary/10": activate && !answering,
+          "bg-base-200 saturate-50": hasBuzzed && !activate && !answering,
           "buzz-ordered-item": typeof order === "number",
           "opacity-60": !online,
           "buzz-activate-pop": activate,
@@ -47,6 +50,7 @@ export const UserBar: React.FC<UserBarProps> = ({
                 " ease-out",
                 {
                   "badge-soft": answering,
+                  "badge-neutral badge-soft": hasBuzzed && !activate && !answering,
                   "userbar-active": activate,
                   userbar: !activate,
                 },
@@ -59,14 +63,16 @@ export const UserBar: React.FC<UserBarProps> = ({
                 "text-primary-content": answering,
                 "text-primary translate-x-0": activate,
                 "-translate-x-10": !activate,
+                "text-base-content/70": hasBuzzed && !activate && !answering,
                 "text-gray-400": !online,
               })}
             >
               {username}
             </div>
-            {isSelf || !online || (showKickAction && onKick) ? (
+            {isSelf || !online || (showKickAction && onKick) || (isSelf && hasBuzzed) ? (
               <div className="ml-auto flex items-center gap-1">
                 {isSelf ? <div className="badge badge-soft badge-info">我</div> : null}
+                {isSelf && hasBuzzed ? <div className="badge badge-soft badge-warning">已抢答</div> : null}
                 {!online ? <div className="badge badge-soft badge-neutral text-xs">离线</div> : null}
                 {showKickAction && onKick ? (
                   <button

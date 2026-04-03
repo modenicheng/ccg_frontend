@@ -52,6 +52,7 @@ export interface RoomState {
   // 玩家和队列
   players: RoomStatePlayerItem[]; // 完整的玩家对象
   answer_queue: AnswerQueueItem[];
+  answer_queue_tail_player_id: number | null;
   round_scored: boolean;
   round_answers: RoundAnswerItem[];
 
