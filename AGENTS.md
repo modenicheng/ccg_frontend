@@ -113,16 +113,17 @@ pnpm prepare       # Install Husky git hooks
 
 ```
 src/
-├─ App.tsx                 # Root routing (HomePage, RoomPage, RoomManagePage)
+├─ App.tsx                 # Root routing (HomePage, RoomPage, RoomManagePage, SpectatorPage)
 ├─ App.css                 # Global Tailwind/daisyUI styles
 ├─ api/                    # REST API clients (axios‑based)
 ├─ audioPlayer/            # Web Audio worklet and player logic
-├─ components/             # Reusable UI components
+├─ components/             # Reusable UI components (20+ components)
+├─ hooks/                  # Custom React Hooks (useIsOwner, useWindowFocus)
 ├─ pages/                  # Page‑level components
-├─ stores/                 # Zustand state stores
+├─ stores/                 # Zustand state stores (gameStore, persistStore, webSocketStore, errorToastStore)
 ├─ types/                  # Shared TypeScript definitions
-├─ utils/                  # Utility functions
-└─ wsClient/               # WebSocket client and message handlers
+├─ utils/                  # Utility functions (color, common, roomAuth)
+└─ wsClient/               # WebSocket client and message handlers (binary frames, heartbeat, time sync)
 ```
 
 ## Development Notes
@@ -130,7 +131,10 @@ src/
 - **Backend proxy**: Vite proxies `/api` and `/ws` to `localhost:8000` (see `vite.config.ts`).
 - **Environment variables**: Use `import.meta.env` (e.g., `VITE_BACKEND_ORIGIN`).
 - **Theme persistence**: The `persistStore` automatically saves theme/volume/users to localStorage.
-- **WebSocket connection**: Connects to `/ws/:roomid` (see `src/pages/RoomPage.tsx`).
+- **WebSocket connection**: Connects to `/ws/:roomid` (player) or `/ws/:roomid/watch` (spectator).
+- **Binary protocols**: WebSocket uses binary frames for audio streaming (AudioFrame, HeartbeatFrame, TimeSyncFrame).
+- **Custom hooks**: Use `useIsOwner` to check room ownership, `useWindowFocus` for visibility detection.
+- **Error toasts**: ErrorToastStore supports error/success/info variants, max 6 toasts displayed.
 
 ## Cursor / Copilot Rules
 
