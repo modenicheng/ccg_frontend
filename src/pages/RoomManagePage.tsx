@@ -1029,15 +1029,13 @@ const RoomManagePage = () => {
   };
 
   const handleDissolveRoom = async () => {
-    if (!wsClient) return;
-
     dissolveRoomConfirmDialogRef.current?.showModal();
   };
 
   const handleConfirmDissolveRoom = async () => {
     try {
       // 调用解散房间 API
-      await fetch(`/api/room/${encodeURIComponent(roomId)}/dissolve`, {
+      await fetch(`/api/room/${encodeURIComponent(roomid!)}/dissolve`, {
         method: 'DELETE',
       });
 
