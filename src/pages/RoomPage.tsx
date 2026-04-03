@@ -48,6 +48,7 @@ import type {
   TagsUpdateMessage,
   TagGroupsUpdateMessage,
   TagGroupMessage,
+  RoundAnswerItem,
   ShowSongMessage,
   PlaybackState,
 } from "../types/wsMessages";
@@ -169,6 +170,43 @@ const applyScoreDeltaUpdate = (
   });
 
   return Array.from(nextByPlayerId.values());
+};
+
+const isAnsweringOrJudgingRoundState = (roundState: number | string) => {
+  return (
+    roundState === 2 ||
+    roundState === 3 ||
+    roundState === 4 ||
+    roundState === "ANSWERING" ||
+    roundState === "JUDGING" ||
+    roundState === "COMPLETED"
+  );
+};
+
+const mergeRoundAnswersFromRoomState = (
+  incomingRoundAnswers: RoundAnswerItem[],
+  previousRoundAnswers: RoundAnswerItem[],
+  roundState: number | string,
+) => {
+  if (!isAnsweringOrJudgingRoundState(roundState)) {
+    return incomingRoundAnswers;
+  }
+
+  if (incomingRoundAnswers.length === 0) {
+    return previousRoundAnswers;
+  }
+
+  const mergedByPlayerId = new Map<number, RoundAnswerItem>(
+    previousRoundAnswers.map((answer) => [answer.player_id, answer]),
+  );
+
+  incomingRoundAnswers.forEach((answer) => {
+    mergedByPlayerId.set(answer.player_id, answer);
+  });
+
+  return Array.from(mergedByPlayerId.values()).sort(
+    (a, b) => a.order - b.order,
+  );
 };
 
 function RoomPage() {
@@ -610,6 +648,24 @@ function RoomPage() {
     }
 
     return queue.slice(0, tailIndex + 1).map((item) => item.player_id);
+  }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
+
+  const buzzedOrderByUserId = useMemo(() => {
+    const queue = roomState?.answer_queue ?? [];
+    const tailPlayerId = roomState?.answer_queue_tail_player_id ?? null;
+    if (tailPlayerId === null) {
+      return {};
+    }
+
+    const tailIndex = queue.findIndex((item) => item.player_id === tailPlayerId);
+    if (tailIndex < 0) {
+      return {};
+    }
+
+    return queue.slice(0, tailIndex + 1).reduce<Record<number, number>>((acc, item, index) => {
+      acc[item.player_id] = item.order ?? index + 1;
+      return acc;
+    }, {});
   }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
 
   const isCurrentPlayerInAnswerQueue = useMemo(() => {
@@ -1107,6 +1163,13 @@ function RoomPage() {
           return;
         }
         const payload = message.data;
+        const previousRoundAnswers =
+          gameStore.getState().roomState?.round_answers ?? [];
+        const mergedRoundAnswers = mergeRoundAnswersFromRoomState(
+          payload.round_answers ?? [],
+          previousRoundAnswers,
+          payload.round_state,
+        );
 
         // 使用 ROOM_STATE 作为权威来源，自动纠正本地持久化身份（尤其是 isOwner）
         const currentUserId = userIdRef.current;
@@ -1167,7 +1230,7 @@ function RoomPage() {
           answer_queue: payload.answer_queue,
           answer_queue_tail_player_id: payload.answer_queue_tail_player_id,
           round_scored: payload.round_scored ?? false,
-          round_answers: payload.round_answers ?? [],
+          round_answers: mergedRoundAnswers,
 
           // 标签系统
           tag_groups: payload.tag_groups,
@@ -1224,7 +1287,7 @@ function RoomPage() {
 
         setTagGroups(payload.tag_groups);
         setPlayerAnswers(
-          (payload.round_answers ?? []).map((answer) => ({
+          mergedRoundAnswers.map((answer) => ({
             playerId: answer.player_id,
             username: answer.username,
             answers: answer.answers,
@@ -1562,10 +1625,17 @@ function RoomPage() {
           description: string;
           order: number;
         }>;
+        answers?: Array<{
+          player_id: number;
+          username: string;
+          selected_tags: number[];
+          description: string | null;
+        }>;
       };
     }>(GameEventId.JUDGING, (message) => {
       setIsJudging(true);
       const latestTagGroups = gameStore.getState().roomState?.tag_groups ?? [];
+      const latestAnswerQueue = gameStore.getState().roomState?.answer_queue ?? [];
       // 判分时显示完整曲目信息
       if (message.data?.song) {
         setCurrentSong({
@@ -1587,6 +1657,9 @@ function RoomPage() {
       setPlayerDescriptions(message.data?.player_descriptions || []);
 
       // 存储玩家作答情况
+      // 兼容两种协议：
+      // 1) 新协议: player_answers[].answers (tagGroupId -> tagId)
+      // 2) 旧/后端当前协议: answers[].selected_tags (tagId[])
       if (message.data?.player_answers) {
         setPlayerAnswers(
           message.data.player_answers.map((answer) => ({
@@ -1597,6 +1670,37 @@ function RoomPage() {
             order: answer.order,
           })),
         );
+      } else if (message.data?.answers) {
+        const queueOrderByUserId = latestAnswerQueue.reduce<Record<number, number>>(
+          (acc, item, index) => {
+            acc[item.player_id] = item.order ?? index + 1;
+            return acc;
+          },
+          {},
+        );
+
+        const normalizedAnswers = message.data.answers.map((answer, index) => {
+          const selectedAnswerMap: Record<number, number | null> = {};
+
+          answer.selected_tags.forEach((tagId) => {
+            const matchedGroup = latestTagGroups.find((group) =>
+              group.tags.some((tag) => tag.id === tagId),
+            );
+            if (matchedGroup) {
+              selectedAnswerMap[matchedGroup.id] = tagId;
+            }
+          });
+
+          return {
+            playerId: answer.player_id,
+            username: answer.username,
+            answers: selectedAnswerMap,
+            description: answer.description ?? "",
+            order: queueOrderByUserId[answer.player_id] ?? index + 1,
+          };
+        });
+
+        setPlayerAnswers(normalizedAnswers);
       } else {
         // 如果没有player_answers，尝试从player_descriptions构建
         const playerAnswersFromDescriptions =
@@ -2754,6 +2858,7 @@ function RoomPage() {
           sortedOnlinePlayers={sortedOnlinePlayers}
           answerOrderByUserId={answerOrderByUserId}
           buzzedPlayerIds={buzzedPlayerIds}
+          buzzedOrderByUserId={buzzedOrderByUserId}
           currentAnsweringPlayer={currentAnsweringPlayer}
           userId={userId}
           isOwner={isOwner}

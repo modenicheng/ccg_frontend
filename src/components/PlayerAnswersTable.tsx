@@ -62,7 +62,7 @@ export function PlayerAnswersTable({
                       <th className="text-end">{answer.order}</th>
                       <th className="text-nowrap">{answer.username}</th>
                       {tagGroups.map((group) => {
-                        const selectedTagId = answer.answers[group.id];
+                        const selectedTagId = answer.answers?.[group.id];
                         const selectedTag = group.tags.find(
                           (tag) => tag.id === selectedTagId,
                         );

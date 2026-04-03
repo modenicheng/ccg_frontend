@@ -26,6 +26,8 @@ export const UserBar: React.FC<UserBarProps> = ({
   kickDisabled = false,
   onKick,
 }) => {
+  const orderedLayout = activate || hasBuzzed;
+
   return (
     <>
       <div
@@ -51,8 +53,8 @@ export const UserBar: React.FC<UserBarProps> = ({
                 {
                   "badge-soft": answering,
                   "badge-neutral badge-soft": hasBuzzed && !activate && !answering,
-                  "userbar-active": activate,
-                  userbar: !activate,
+                  "userbar-active": orderedLayout,
+                  userbar: !orderedLayout,
                 },
               )}
             >
@@ -62,7 +64,8 @@ export const UserBar: React.FC<UserBarProps> = ({
               className={clsx("font-semibold text-base transition-all ease-out", {
                 "text-primary-content": answering,
                 "text-primary translate-x-0": activate,
-                "-translate-x-10": !activate,
+                "text-base-content translate-x-0": hasBuzzed && !activate,
+                "-translate-x-10": !activate && !hasBuzzed,
                 "text-base-content/70": hasBuzzed && !activate && !answering,
                 "text-gray-400": !online,
               })}

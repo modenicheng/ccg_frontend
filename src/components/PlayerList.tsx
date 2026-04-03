@@ -12,6 +12,7 @@ interface PlayerListProps {
   sortedOnlinePlayers: PlayerEntry[];
   answerOrderByUserId: Record<number, number>;
   buzzedPlayerIds: number[];
+  buzzedOrderByUserId: Record<number, number>;
   currentAnsweringPlayer: number | null;
   userId: number | null;
   isOwner: boolean;
@@ -23,6 +24,7 @@ export function PlayerList({
   sortedOnlinePlayers,
   answerOrderByUserId,
   buzzedPlayerIds,
+  buzzedOrderByUserId,
   currentAnsweringPlayer,
   userId,
   isOwner,
@@ -46,21 +48,22 @@ export function PlayerList({
           </li>
           {sortedOnlinePlayers.length > 0 ? (
             sortedOnlinePlayers.map((player) => {
-              const order = answerOrderByUserId[player.id];
+              const activeOrder = answerOrderByUserId[player.id];
+              const order = activeOrder ?? buzzedOrderByUserId[player.id];
               const isCurrentUser = userId !== null && player.id === userId;
               const hasBuzzed = buzzedPlayerIds.includes(player.id);
               return (
                 <li
                   key={player.id}
                   className={clsx("px-2 transition-all duration-300", {
-                    "buzz-ordered-item": typeof order === "number",
+                    "buzz-ordered-item": typeof activeOrder === "number",
                   })}
                 >
                   <div className="flex items-center justify-between">
                     <UserBar
                       username={player.username}
                       order={order}
-                      activate={typeof order === "number"}
+                      activate={typeof activeOrder === "number"}
                       answering={currentAnsweringPlayer === player.id}
                       hasBuzzed={hasBuzzed}
                       isSelf={isCurrentUser}

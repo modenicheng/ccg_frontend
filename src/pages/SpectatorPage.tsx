@@ -25,6 +25,7 @@ import type {
   ClearAnswerQueueMessage,
   PreloadAudioMessage,
   TagGroupMessage,
+  RoundAnswerItem,
   ShowSongMessage,
   PlaybackState,
 } from "../types/wsMessages";
@@ -69,6 +70,41 @@ const getActiveAnswerQueue = (
     return [];
   }
   return queue.slice(tailIndex + 1);
+};
+
+const isAnsweringOrJudgingRoundState = (roundState: number | string) => {
+  return (
+    roundState === 2 ||
+    roundState === 3 ||
+    roundState === "ANSWERING" ||
+    roundState === "JUDGING"
+  );
+};
+
+const mergeRoundAnswersFromRoomState = (
+  incomingRoundAnswers: RoundAnswerItem[],
+  previousRoundAnswers: RoundAnswerItem[],
+  roundState: number | string,
+) => {
+  if (!isAnsweringOrJudgingRoundState(roundState)) {
+    return incomingRoundAnswers;
+  }
+
+  if (incomingRoundAnswers.length === 0) {
+    return previousRoundAnswers;
+  }
+
+  const mergedByPlayerId = new Map<number, RoundAnswerItem>(
+    previousRoundAnswers.map((answer) => [answer.player_id, answer]),
+  );
+
+  incomingRoundAnswers.forEach((answer) => {
+    mergedByPlayerId.set(answer.player_id, answer);
+  });
+
+  return Array.from(mergedByPlayerId.values()).sort(
+    (a, b) => a.order - b.order,
+  );
 };
 
 function SpectatorPage() {
@@ -181,6 +217,24 @@ function SpectatorPage() {
     }
 
     return queue.slice(0, tailIndex + 1).map((item) => item.player_id);
+  }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
+
+  const buzzedOrderByUserId = useMemo(() => {
+    const queue = roomState?.answer_queue ?? [];
+    const tailPlayerId = roomState?.answer_queue_tail_player_id ?? null;
+    if (tailPlayerId === null) {
+      return {};
+    }
+
+    const tailIndex = queue.findIndex((item) => item.player_id === tailPlayerId);
+    if (tailIndex < 0) {
+      return {};
+    }
+
+    return queue.slice(0, tailIndex + 1).reduce<Record<number, number>>((acc, item, index) => {
+      acc[item.player_id] = item.order ?? index + 1;
+      return acc;
+    }, {});
   }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
 
   const applyRemoteProgress = useCallback(
@@ -351,6 +405,13 @@ function SpectatorPage() {
       GameEventId.ROOM_STATE,
       async (message) => {
         const payload = message.data;
+        const previousRoundAnswers =
+          gameStore.getState().roomState?.round_answers ?? [];
+        const mergedRoundAnswers = mergeRoundAnswersFromRoomState(
+          payload.round_answers ?? [],
+          previousRoundAnswers,
+          payload.round_state,
+        );
 
         // 从玩家列表中获取房主
         const ownerPlayer = payload.players.find((p) => p.is_owner);
@@ -382,7 +443,7 @@ function SpectatorPage() {
           answer_queue: payload.answer_queue,
           answer_queue_tail_player_id: payload.answer_queue_tail_player_id,
           round_scored: payload.round_scored ?? false,
-          round_answers: payload.round_answers ?? [],
+          round_answers: mergedRoundAnswers,
 
           // 标签系统
           tag_groups: payload.tag_groups,
@@ -429,7 +490,7 @@ function SpectatorPage() {
           payload.answer_queue_tail_player_id,
         );
         setPlayerAnswers(
-          (payload.round_answers ?? []).map((answer) => ({
+          mergedRoundAnswers.map((answer) => ({
             playerId: answer.player_id,
             username: answer.username,
             answers: answer.answers,
@@ -1205,20 +1266,21 @@ function SpectatorPage() {
               </li>
               {sortedOnlinePlayers.length > 0 ? (
                 sortedOnlinePlayers.map((player) => {
-                  const order = answerOrderByUserId[player.id];
+                  const activeOrder = answerOrderByUserId[player.id];
+                  const order = activeOrder ?? buzzedOrderByUserId[player.id];
                   const hasBuzzed = buzzedPlayerIds.includes(player.id);
                   return (
                     <li
                       key={player.id}
                       className={clsx("px-2 transition-all duration-300", {
-                        "buzz-ordered-item": typeof order === "number",
+                        "buzz-ordered-item": typeof activeOrder === "number",
                       })}
                     >
                       <div className="flex items-center justify-between">
                         <UserBar
                           username={player.username}
                           order={order}
-                          activate={typeof order === "number"}
+                          activate={typeof activeOrder === "number"}
                           answering={currentAnsweringPlayer === player.id}
                           hasBuzzed={hasBuzzed}
                           isSelf={false}
