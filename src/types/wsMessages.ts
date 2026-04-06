@@ -50,6 +50,7 @@ export interface PlayControlData {
   progress_ms: number;
   offset_ts?: number | null; // 前端可选，后端处理时会填充
   audio_url?: string | null;
+  current_order?: number;
 }
 
 // RoomState消息的数据部分，与后端room_schemas.py中的ClientRoomState一致
@@ -229,7 +230,9 @@ export function isPlayControlData(value: unknown): value is PlayControlData {
     typeof candidate.progress_ms === "number" &&
     (candidate.offset_ts === undefined ||
       candidate.offset_ts === null ||
-      typeof candidate.offset_ts === "number")
+      typeof candidate.offset_ts === "number") &&
+    (candidate.current_order === undefined ||
+      typeof candidate.current_order === "number")
   );
 }
 

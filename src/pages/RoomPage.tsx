@@ -551,7 +551,10 @@ function RoomPage() {
             ? Math.max(0, message.data.offset_ts)
             : message.ts,
         play_state: playState,
-        current_order: previousPlaybackStatus?.current_order ?? 0,
+        current_order:
+          typeof message.data.current_order === "number"
+            ? message.data.current_order
+            : previousPlaybackStatus?.current_order ?? 0,
         audio_url: audioUrl,
       };
     },
@@ -842,21 +845,41 @@ function RoomPage() {
         await audioRef.current.pause();
       }
 
+      const latestRoomState = gameStore.getState().roomState;
+      const resolvedAudioUrl =
+        currentAudioUrl ||
+        currentAudioUrlRef.current ||
+        audioRef.current.getCurrentUrl?.() ||
+        latestRoomState?.playback_status?.audio_url ||
+        null;
+
       // 若没有有效的音频URL，不发送播放控制消息
-      if (!currentAudioUrl) {
+      if (!resolvedAudioUrl) {
         console.error("[PLAY_CONTROL] Cannot send playback control: no valid audio_url available");
         return;
       }
 
+      if (resolvedAudioUrl !== currentAudioUrlRef.current) {
+        currentAudioUrlRef.current = resolvedAudioUrl;
+      }
+      if (resolvedAudioUrl !== currentAudioUrl) {
+        setCurrentAudioUrl(resolvedAudioUrl);
+      }
+
       const progressMs = audioRef.current.currentTimeMs;
       const calibratedNow = Math.round(getCalibratedNow());
+      const latestPlaybackStatus = latestRoomState?.playback_status;
       const payload: PlayControlMessage = {
         event,
         ts: calibratedNow,
         data: {
           progress_ms: progressMs,
           offset_ts: calibratedNow,
-          audio_url: currentAudioUrl,
+          audio_url: resolvedAudioUrl,
+          current_order:
+            typeof latestPlaybackStatus?.current_order === "number"
+              ? latestPlaybackStatus.current_order
+              : 0,
         },
       };
 
@@ -1060,9 +1083,14 @@ function RoomPage() {
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
 
-      // PAUSE 事件不应 seek：音频已经在 handleBuzz 中通过 pause() 暂停在正确位置
-      // 如果 seek 到 server 返回的 progress_ms，可能因为 server 数据不准确而错误地将进度重置为 0
-      if (shouldSeek && !isPauseEvent) {
+      const latestRoomState = gameStore.getState().roomState;
+      const shouldSeekOnPause =
+        latestRoomState?.status === "waiting" ||
+        latestRoomState?.playback_status?.current_order === -1;
+
+      // 对局中 PAUSE 继续保持“默认不 seek”，避免抢答时回拉；
+      // 但预热 BGM / test audio（waiting 或 current_order=-1）必须 seek 才能实现房主与玩家暂停位点同步。
+      if (shouldSeek && (!isPauseEvent || shouldSeekOnPause)) {
         const durationMs = audioRef.current.durationMs;
         const clamped =
           durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
