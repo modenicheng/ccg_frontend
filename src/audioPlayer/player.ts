@@ -51,6 +51,25 @@ class audioPlayer {
   private animationFrameId: number | null = null;
   private isDrawing = false; // 防止多次启动动画
 
+  private notifyAutoplayBlocked(error: unknown, context: string): void {
+    const maybeError = error as { name?: unknown; message?: unknown } | null;
+    const errorName = typeof maybeError?.name === "string" ? maybeError.name : "";
+    if (errorName !== "NotAllowedError") {
+      return;
+    }
+
+    const message =
+      typeof maybeError?.message === "string" && maybeError.message.trim().length > 0
+        ? maybeError.message
+        : "The AudioContext was not allowed to start. It must be resumed after a user gesture.";
+
+    const normalizedError = new Error(message);
+    normalizedError.name = "NotAllowedError";
+
+    console.warn(`[AUDIO_CONTEXT] ${context} blocked by browser, requires user gesture`);
+    this.playbackErrorCallback?.(normalizedError);
+  }
+
   constructor() {
     // AudioContext 可以在构造函数中创建，但要注意浏览器自动播放策略
     this.audioCtx = new AudioContext();
@@ -78,6 +97,7 @@ class audioPlayer {
         this.audioState = "running";
         console.log("[AUDIO_CONTEXT] AudioContext resumed successfully");
       } catch (err) {
+        this.notifyAutoplayBlocked(err, "ensureRunning");
         console.error("[AUDIO_CONTEXT] Failed to resume AudioContext:", err);
         throw err;
       }
@@ -568,9 +588,14 @@ class audioPlayer {
    */
   async initAudioContext() {
     if (this.audioCtx.state === "suspended") {
-      await this.audioCtx.resume();
-      this.audioState = "running";
-      this.stateChangeCallback?.(this.audioState);
+      try {
+        await this.audioCtx.resume();
+        this.audioState = "running";
+        this.stateChangeCallback?.(this.audioState);
+      } catch (err) {
+        this.notifyAutoplayBlocked(err, "initAudioContext");
+        throw err;
+      }
     }
   }
 
@@ -745,7 +770,12 @@ class audioPlayer {
     this.audioElement = audio;
 
     // 6. 确保 AudioContext 已启动
-    await this.audioCtx.resume();
+    try {
+      await this.audioCtx.resume();
+    } catch (err) {
+      this.notifyAutoplayBlocked(err, "setupAudioElement.resume");
+      throw err;
+    }
 
     if (playByDefault) {
       // 7. 播放
@@ -834,7 +864,12 @@ class audioPlayer {
     if (this.audioElement) {
       // 确保 AudioContext 处于运行状态
       if (this.audioCtx.state === "suspended") {
-        await this.audioCtx.resume();
+        try {
+          await this.audioCtx.resume();
+        } catch (err) {
+          this.notifyAutoplayBlocked(err, "resume.context");
+          throw err;
+        }
       }
       try {
         await this.audioElement.play();
@@ -842,24 +877,22 @@ class audioPlayer {
         this.stateChangeCallback?.(this.audioState);
       } catch (err) {
         console.error("播放失败", err);
-        // 检测是否为用户手势限制导致的错误
-        if (err instanceof Error && err.name === "NotAllowedError") {
-          console.warn("[AUDIO_CONTEXT] Resume blocked by browser, requires user gesture");
-          this.playbackErrorCallback?.(err as Error);
-        }
+        this.notifyAutoplayBlocked(err, "resume.play");
         // 尝试恢复 AudioContext 后重试一次
         if (this.audioCtx.state !== "running") {
-          await this.audioCtx.resume();
+          try {
+            await this.audioCtx.resume();
+          } catch (resumeErr) {
+            this.notifyAutoplayBlocked(resumeErr, "resume.retryContext");
+            throw resumeErr;
+          }
           try {
             await this.audioElement.play();
             this.audioState = "running";
             this.stateChangeCallback?.(this.audioState);
           } catch (retryErr) {
             console.error("重试播放失败", retryErr);
-            // 再次检测 NotAllowedError
-            if (retryErr instanceof Error && retryErr.name === "NotAllowedError") {
-              this.playbackErrorCallback?.(retryErr as Error);
-            }
+            this.notifyAutoplayBlocked(retryErr, "resume.retryPlay");
             this.audioState = "closed";
             this.stateChangeCallback?.(this.audioState);
             throw retryErr;

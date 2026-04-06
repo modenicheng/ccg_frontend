@@ -331,9 +331,12 @@ function RoomPage() {
   const {
     showAudioPrompt,
     handleAudioPromptClick,
-    closeAudioPrompt,
     setupAudioPlayerInterceptor,
   } = useAudioContextInterceptor();
+  const [needsGesturePromptOnInit, setNeedsGesturePromptOnInit] =
+    useState<boolean>(false);
+  const hasUserInteractedRef = useRef<boolean>(false);
+  const hasCheckedInitialPlaybackPromptRef = useRef<boolean>(false);
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -1090,14 +1093,19 @@ function RoomPage() {
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
 
       const latestRoomState = gameStore.getState().roomState;
+      const isWaitingLoopingWarmup = latestRoomState?.status === "waiting";
       const shouldSeekOnPause =
         latestRoomState?.status === "waiting" ||
         latestRoomState?.playback_status?.current_order === -1;
 
+      const durationMs = audioRef.current.durationMs;
+      if (isWaitingLoopingWarmup && durationMs > 0) {
+        expectedMs = ((expectedMs % durationMs) + durationMs) % durationMs;
+      }
+
       // 对局中 PAUSE 继续保持“默认不 seek”，避免抢答时回拉；
       // 但预热 BGM / test audio（waiting 或 current_order=-1）必须 seek 才能实现房主与玩家暂停位点同步。
       if (shouldSeek && (!isPauseEvent || shouldSeekOnPause)) {
-        const durationMs = audioRef.current.durationMs;
         const clamped =
           durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
         audioRef.current.progressMs = clamped;
@@ -1105,6 +1113,47 @@ function RoomPage() {
     },
     [getCalibratedNow],
   );
+
+  const handleRecoverPlaybackWithGesture = useCallback(async () => {
+    await handleAudioPromptClick(audioRef.current);
+
+    const latestPlaybackStatus = gameStore.getState().roomState?.playback_status;
+    if (!latestPlaybackStatus || latestPlaybackStatus.play_state !== "playing") {
+      return;
+    }
+
+    const pseudoMessage: PlayControlMessage = {
+      event: GameEventId.PLAY,
+      ts: latestPlaybackStatus.updated_at,
+      data: {
+        progress_ms: latestPlaybackStatus.progress_ms,
+        offset_ts: latestPlaybackStatus.offset_ts,
+        audio_url: latestPlaybackStatus.audio_url,
+        current_order: latestPlaybackStatus.current_order,
+      },
+    };
+
+    applyRemoteProgress(pseudoMessage, true);
+    await audioRef.current?.resume();
+    setNeedsGesturePromptOnInit(false);
+  }, [applyRemoteProgress, handleAudioPromptClick]);
+
+  useEffect(() => {
+    const markUserInteraction = () => {
+      hasUserInteractedRef.current = true;
+    };
+
+    window.addEventListener("pointerdown", markUserInteraction, {
+      passive: true,
+      once: true,
+    });
+    window.addEventListener("keydown", markUserInteraction, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", markUserInteraction);
+      window.removeEventListener("keydown", markUserInteraction);
+    };
+  }, []);
 
   useEffect(() => {
     currentAudioUrlRef.current = currentAudioUrl;
@@ -1344,6 +1393,16 @@ function RoomPage() {
         const audioPlayer = audioRef.current;
         const shouldForcePlaybackResync = shouldForcePlaybackResyncRef.current;
         let didLoadOrRebindAudio = false;
+
+        if (!hasCheckedInitialPlaybackPromptRef.current) {
+          hasCheckedInitialPlaybackPromptRef.current = true;
+          if (
+            playbackStatus?.play_state === "playing" &&
+            !hasUserInteractedRef.current
+          ) {
+            setNeedsGesturePromptOnInit(true);
+          }
+        }
 
         if (playbackStatus && audioPlayer && !isProgressDraggingRef.current) {
           try {
@@ -2850,6 +2909,28 @@ function RoomPage() {
     };
   }, [adjustVolume, showVolumeToast]);
 
+  useEffect(() => {
+    if (!showAudioPrompt && !needsGesturePromptOnInit) {
+      return;
+    }
+
+    const handleUserGesture = () => {
+      hasUserInteractedRef.current = true;
+      void handleRecoverPlaybackWithGesture();
+    };
+
+    window.addEventListener("pointerdown", handleUserGesture, {
+      passive: true,
+      once: true,
+    });
+    window.addEventListener("keydown", handleUserGesture, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", handleUserGesture);
+      window.removeEventListener("keydown", handleUserGesture);
+    };
+  }, [handleRecoverPlaybackWithGesture, showAudioPrompt, needsGesturePromptOnInit]);
+
   if (!roomId) {
     return <Navigate to="/" replace />;
   }
@@ -3001,29 +3082,20 @@ function RoomPage() {
       />
 
       {/* AudioContext 被浏览器拦截时的提示弹窗 */}
-      {showAudioPrompt && (
+      {(showAudioPrompt || needsGesturePromptOnInit) && (
         <dialog className="modal modal-open" open>
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">需要您的操作</h3>
+          <div className="modal-box max-w-md">
+            <h3 className="font-bold text-lg">浏览器已阻止自动播放</h3>
             <p className="py-4">
-              浏览器已暂停音频播放，请点击下方按钮恢复音频。
+              请先点击页面任意位置（或按任意键），系统会自动尝试恢复播放。
             </p>
             <div className="modal-action">
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => {
-                  handleAudioPromptClick(audioRef.current);
-                }}
+                onClick={handleRecoverPlaybackWithGesture}
               >
-                恢复音频播放
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={closeAudioPrompt}
-              >
-                稍后处理
+                立即恢复播放
               </button>
             </div>
           </div>
