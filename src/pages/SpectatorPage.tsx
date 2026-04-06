@@ -271,7 +271,12 @@ function SpectatorPage() {
       const shouldSeek =
         force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
 
-      if (shouldSeek && !isPauseEvent) {
+      const latestRoomState = gameStore.getState().roomState;
+      const shouldSeekOnPause =
+        latestRoomState?.status === "waiting" ||
+        latestRoomState?.playback_status?.current_order === -1;
+
+      if (shouldSeek && (!isPauseEvent || shouldSeekOnPause)) {
         const durationMs = audioRef.current.durationMs;
         const clamped =
           durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
@@ -373,7 +378,10 @@ function SpectatorPage() {
             ? Math.max(0, message.data.offset_ts)
             : message.ts,
         play_state: playState,
-        current_order: previousPlaybackStatus?.current_order ?? 0,
+        current_order:
+          typeof message.data.current_order === "number"
+            ? message.data.current_order
+            : previousPlaybackStatus?.current_order ?? 0,
         audio_url: audioUrl,
       };
     },
