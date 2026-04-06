@@ -227,6 +227,10 @@ const RoomManagePage = () => {
   const [initialTestAudioSongId, setInitialTestAudioSongId] = useState<number | null>(null); // 保存按钮变更判断
   const [isSettingTestAudio, setIsSettingTestAudio] = useState(false);
   const [testAudioSearchKw, setTestAudioSearchKw] = useState<string>("");
+  const [testAudioSongs, setTestAudioSongs] = useState<Song[]>([]); // 所有数据库歌曲
+  const [testAudioSongsTotal, setTestAudioSongsTotal] = useState(0);
+  const [testAudioSongsPage, setTestAudioSongsPage] = useState(1);
+  const [isLoadingTestAudioSongs, setIsLoadingTestAudioSongs] = useState(false);
 
   // 房间歌曲状态
   const [roomSongs, setRoomSongs] = useState<RoomSong[]>([]);
@@ -280,6 +284,26 @@ const RoomManagePage = () => {
       }
     },
     [songPage],
+  );
+
+  const loadTestAudioSongs = useCallback(
+    async (page: number, kw?: string) => {
+      setIsLoadingTestAudioSongs(true);
+      try {
+        const { list, total } = await getSongs({
+          offset: (page - 1) * roomSongsPageSize,
+          limit: roomSongsPageSize,
+          kw: kw || undefined,
+        });
+        setTestAudioSongs(list);
+        setTestAudioSongsTotal(total);
+      } catch (err) {
+        setSongManageError((err as Error).message || "加载歌曲列表失败");
+      } finally {
+        setIsLoadingTestAudioSongs(false);
+      }
+    },
+    [],
   );
 
   const loadRoomSongs = useCallback(
@@ -1053,6 +1077,19 @@ const RoomManagePage = () => {
     }
   };
 
+  const handleOpenTestAudioDialog = async () => {
+    setIsSettingTestAudio(true);
+    setTestAudioSongsPage(1);
+    setTestAudioSongsTotal(0);
+    await loadTestAudioSongs(1, testAudioSearchKw);
+  };
+
+  const handleTestAudioSongsPageChange = async (nextPage: number) => {
+    if (nextPage < 1 || nextPage === testAudioSongsPage) return;
+    setTestAudioSongsPage(nextPage);
+    await loadTestAudioSongs(nextPage, testAudioSearchKw);
+  };
+
   const handleOpenSongManageDialog = async (tab?: "songs" | "songlists") => {
     const activeTab = tab ?? songManageTab;
     if (tab) {
@@ -1288,16 +1325,6 @@ const RoomManagePage = () => {
   const handleSetTestAudio = async (songDbId: number) => {
     if (!roomid) return;
     
-    // 从房间歌曲列表中查找对应的歌曲信息
-    const targetSong = roomSongs.find(
-      (rs) => rs.song_id === songDbId
-    );
-    
-    if (!targetSong) {
-      setSongManageError("歌曲不在房间歌单中，请先添加歌曲到房间");
-      return;
-    }
-    
     setIsSettingTestAudio(false);
     
     try {
@@ -1311,7 +1338,7 @@ const RoomManagePage = () => {
       if (response.ok) {
         const result = await response.json();
         setTestAudioSongId(songDbId);
-        setSongManageSuccess(`已设置预热 BGM：${result.title || targetSong.song?.title || '歌曲'} (ID: ${songDbId})`);
+        setSongManageSuccess(`已设置预热 BGM：${result.title || '歌曲'} (ID: ${songDbId})`);
         console.log("Test audio set:", result);
       } else {
         const errorText = await response.text();
@@ -1775,7 +1802,7 @@ const RoomManagePage = () => {
                     type="button"
                     className="btn btn-accent btn-sm"
                     onClick={() => {
-                      setIsSettingTestAudio(true);
+                      void handleOpenTestAudioDialog();
                     }}
                   >
                     <Icon icon="mdi:volume-high" className="text-lg" />
@@ -3007,7 +3034,7 @@ const RoomManagePage = () => {
           <div className="modal-box max-w-3xl">
             <h3 className="font-bold text-lg">设置预热背景音乐</h3>
             <p className="py-2">
-              从已导入的歌曲中选择一首作为房间等待时的预热 BGM
+              从数据库已导入的单曲中选择一首作为房间等待时的预热 BGM
             </p>
             
             {/* 搜索框 */}
@@ -3018,55 +3045,99 @@ const RoomManagePage = () => {
                 className="input input-bordered w-full mb-4"
                 value={testAudioSearchKw}
                 onChange={(e) => setTestAudioSearchKw(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setTestAudioSongsPage(1);
+                    void loadTestAudioSongs(1, testAudioSearchKw);
+                  }
+                }}
               />
               
               {/* 歌曲列表 */}
               <div className="overflow-y-auto max-h-96">
-                <table className="table table-zebra w-full">
-                  <thead>
-                    <tr>
-                      <th>歌曲</th>
-                      <th>歌手</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roomSongs
-                      .filter((song) => {
-                        if (!testAudioSearchKw) return true;
-                        const kw = testAudioSearchKw.toLowerCase();
-                        return (
-                          song.song?.title?.toLowerCase().includes(kw) ||
-                          song.song?.artist?.toLowerCase().includes(kw)
-                        );
-                      })
-                      .map((roomSong) => (
-                        <tr key={roomSong.song_id}>
-                          <td>{roomSong.song?.title || '未知歌曲'}</td>
-                          <td>{roomSong.song?.artist || '未知歌手'}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="btn btn-xs btn-accent"
-                              onClick={() => {
-                                handleSetTestAudio(roomSong.song_id);
-                              }}
-                            >
-                              设为 BGM
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-                {roomSongs.length === 0 && (
+                {isLoadingTestAudioSongs ? (
+                  <div className="py-8 text-center">
+                    <span className="loading loading-spinner loading-md" />
+                    <p className="mt-2 text-sm opacity-70">
+                      加载歌曲中...
+                    </p>
+                  </div>
+                ) : (
+                  <table className="table table-zebra w-full">
+                    <thead>
+                      <tr>
+                        <th>歌曲</th>
+                        <th>歌手</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {testAudioSongs
+                        .filter((song) => {
+                          if (!testAudioSearchKw) return true;
+                          const kw = testAudioSearchKw.toLowerCase();
+                          return (
+                            song.title?.toLowerCase().includes(kw) ||
+                            song.artist?.toLowerCase().includes(kw)
+                          );
+                        })
+                        .map((song) => (
+                          <tr key={song.id}>
+                            <td>{song.title || '未知歌曲'}</td>
+                            <td>{song.artist || '未知歌手'}</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-accent"
+                                onClick={() => {
+                                  handleSetTestAudio(song.id);
+                                }}
+                              >
+                                设为 BGM
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                )}
+                {testAudioSongs.length === 0 && !isLoadingTestAudioSongs && (
                   <div className="flex flex-col items-center justify-center py-8 text-base-content/50">
                     <Icon icon="heroicons:music-note" width="24" height="24" />
-                    <p className="mt-2 text-sm">房间中没有歌曲</p>
-                    <p className="text-xs mt-1">请先添加歌曲到房间</p>
+                    <p className="mt-2 text-sm">数据库中没有歌曲</p>
+                    <p className="text-xs mt-1">请先在歌曲管理中添加歌曲</p>
                   </div>
                 )}
               </div>
+              
+              {/* 分页控件 */}
+              {!isLoadingTestAudioSongs && testAudioSongsTotal > 0 && (
+                <div className="flex justify-center items-center gap-2 mt-4">
+                  <span className="text-xs opacity-70">
+                    第 {testAudioSongsPage} / {Math.max(1, Math.ceil(testAudioSongsTotal / roomSongsPageSize))} 页
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-xs"
+                    onClick={() => {
+                      void handleTestAudioSongsPageChange(testAudioSongsPage - 1);
+                    }}
+                    disabled={testAudioSongsPage <= 1}
+                  >
+                    上一页
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs"
+                    onClick={() => {
+                      void handleTestAudioSongsPageChange(testAudioSongsPage + 1);
+                    }}
+                    disabled={testAudioSongsPage >= Math.ceil(testAudioSongsTotal / roomSongsPageSize)}
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
               
               <p className="text-xs opacity-70 mt-4">
                 默认 BGM：001gQVVQ0WD3Al

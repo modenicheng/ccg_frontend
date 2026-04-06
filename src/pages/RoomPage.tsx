@@ -9,7 +9,7 @@ import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
-import { useIsOwner } from "../hooks";
+import { useIsOwner, useAudioContextInterceptor } from "../hooks";
 import type { RoomState, PlayerScore } from "../types/store";
 import {
   SongInfoCard,
@@ -328,6 +328,12 @@ function RoomPage() {
   // const [setCountdown] = useState<number | null>(null);
 
   const isOwner = useIsOwner(user, userId, roomState);
+  const {
+    showAudioPrompt,
+    handleAudioPromptClick,
+    closeAudioPrompt,
+    setupAudioPlayerInterceptor,
+  } = useAudioContextInterceptor();
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -2441,6 +2447,10 @@ function RoomPage() {
       setAudioState(nextState);
     };
     setAudioState(audioRef.current.state);
+    
+    // 设置 AudioContext 拦截检测回调
+    setupAudioPlayerInterceptor(audioRef.current);
+    
     audioRef.current.onEnded = () => {
       if (!isOwnerRef.current || !wsRef.current?.isConnected()) {
         return;
@@ -2467,7 +2477,7 @@ function RoomPage() {
       audioRef.current?.cleanup();
       audioRef.current = null;
     };
-  }, []);
+  }, [setupAudioPlayerInterceptor]);
 
   useEffect(() => {
     if (!roomId || !isConnected || latencyAvg === null) {
@@ -2971,6 +2981,39 @@ function RoomPage() {
         autoCloseMs={ROUND_SUMMARY_AUTO_CLOSE_MS}
         onClose={closeRoundSummaryDialog}
       />
+
+      {/* AudioContext 被浏览器拦截时的提示弹窗 */}
+      {showAudioPrompt && (
+        <dialog className="modal modal-open" open>
+          <div className="modal-box">
+            <h3 className="font-bold text-lg">需要您的操作</h3>
+            <p className="py-4">
+              浏览器已暂停音频播放，请点击下方按钮恢复音频。
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  handleAudioPromptClick(audioRef.current);
+                }}
+              >
+                恢复音频播放
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closeAudioPrompt}
+              >
+                稍后处理
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button>close</button>
+          </form>
+        </dialog>
+      )}
     </div>
   );
 }

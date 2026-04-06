@@ -39,6 +39,7 @@ class audioPlayer {
 
   private stateChangeCallback?: (state: string) => void;
   private endedCallback?: () => void;
+  private playbackErrorCallback?: (error: Error) => void; // 新增：播放错误回调
   private timeUpdateCallback = (ev: Event) => {
     const audio = ev.target as HTMLAudioElement;
     console.log(
@@ -81,6 +82,13 @@ class audioPlayer {
         throw err;
       }
     }
+  }
+
+  /**
+   * 设置播放错误回调（用于检测浏览器拦截）
+   */
+  setPlaybackErrorCallback(callback: (error: Error) => void): void {
+    this.playbackErrorCallback = callback;
   }
 
   initCanvas(canvas: HTMLCanvasElement, parent: HTMLElement) {
@@ -747,6 +755,11 @@ class audioPlayer {
         this.stateChangeCallback?.(this.audioState);
       } catch (err) {
         console.error("播放失败", err);
+        // 检测是否为用户手势限制导致的错误
+        if (err instanceof Error && err.name === "NotAllowedError") {
+          console.warn("[AUDIO_CONTEXT] Playback blocked by browser, requires user gesture");
+          this.playbackErrorCallback?.(err as Error);
+        }
         this.audioState = "closed";
         this.stateChangeCallback?.(this.audioState);
         throw err;
@@ -819,7 +832,7 @@ class audioPlayer {
 
   async resume() {
     if (this.audioElement) {
-      // 确保AudioContext处于运行状态
+      // 确保 AudioContext 处于运行状态
       if (this.audioCtx.state === "suspended") {
         await this.audioCtx.resume();
       }
@@ -829,7 +842,12 @@ class audioPlayer {
         this.stateChangeCallback?.(this.audioState);
       } catch (err) {
         console.error("播放失败", err);
-        // 尝试恢复AudioContext后重试一次
+        // 检测是否为用户手势限制导致的错误
+        if (err instanceof Error && err.name === "NotAllowedError") {
+          console.warn("[AUDIO_CONTEXT] Resume blocked by browser, requires user gesture");
+          this.playbackErrorCallback?.(err as Error);
+        }
+        // 尝试恢复 AudioContext 后重试一次
         if (this.audioCtx.state !== "running") {
           await this.audioCtx.resume();
           try {
@@ -838,6 +856,10 @@ class audioPlayer {
             this.stateChangeCallback?.(this.audioState);
           } catch (retryErr) {
             console.error("重试播放失败", retryErr);
+            // 再次检测 NotAllowedError
+            if (retryErr instanceof Error && retryErr.name === "NotAllowedError") {
+              this.playbackErrorCallback?.(retryErr as Error);
+            }
             this.audioState = "closed";
             this.stateChangeCallback?.(this.audioState);
             throw retryErr;

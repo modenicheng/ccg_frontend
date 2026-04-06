@@ -9,6 +9,7 @@ import useWebSocketStore from "../stores/webSocketStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
+import { useAudioContextInterceptor } from "../hooks";
 import type { RoomState } from "../types/store";
 import { UserBar, SongInfoCard } from "../components";
 import type {
@@ -145,6 +146,12 @@ function SpectatorPage() {
   const [currentAnsweringPlayer, setCurrentAnsweringPlayer] = useState<
     number | null
   >(null);
+  const {
+    showAudioPrompt,
+    handleAudioPromptClick,
+    closeAudioPrompt,
+    setupAudioPlayerInterceptor,
+  } = useAudioContextInterceptor();
 
   // 玩家作答情况状态
   const [playerAnswers, setPlayerAnswers] = useState<
@@ -1102,6 +1109,10 @@ function SpectatorPage() {
         progressBarRef.current.style.width = `${progressPercent}%`;
       }
     };
+    
+    // 设置 AudioContext 拦截检测回调
+    setupAudioPlayerInterceptor(audioRef.current);
+    
     return () => {
       if (canvasInitTimerRef.current !== null) {
         window.clearTimeout(canvasInitTimerRef.current);
@@ -1111,7 +1122,7 @@ function SpectatorPage() {
       audioRef.current?.cleanup();
       audioRef.current = null;
     };
-  }, []);
+  }, [setupAudioPlayerInterceptor]);
 
   useEffect(() => {
     if (!roomId || !isConnected || latencyAvg === null) {
@@ -1368,6 +1379,39 @@ function SpectatorPage() {
           </div>
         </div>
       </div>
+
+      {/* AudioContext 被浏览器拦截时的提示弹窗 */}
+      {showAudioPrompt && (
+        <dialog className="modal modal-open" open>
+          <div className="modal-box">
+            <h3 className="font-bold text-lg">需要您的操作</h3>
+            <p className="py-4">
+              浏览器已暂停音频播放，请点击下方按钮恢复音频。
+            </p>
+            <div className="modal-action">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  handleAudioPromptClick(audioRef.current);
+                }}
+              >
+                恢复音频播放
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={closeAudioPrompt}
+              >
+                稍后处理
+              </button>
+            </div>
+          </div>
+          <form method="dialog" className="modal-backdrop">
+            <button>close</button>
+          </form>
+        </dialog>
+      )}
     </div>
   );
 }
