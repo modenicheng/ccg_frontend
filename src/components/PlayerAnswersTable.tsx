@@ -22,13 +22,13 @@ export function PlayerAnswersTable({
   userId,
 }: PlayerAnswersTableProps) {
   return (
-    <div className="card shadow-sm">
+    <div className="card shadow-sm w-full">
       <div className="card-body p-0">
-        <h3 className="font-semibold text-lg p-4 border-b">
+        <h3 className="font-semibold text-base sm:text-lg p-3 sm:p-4 border-b">
           <Icon
             icon="heroicons:clipboard-list"
-            width={20}
-            height={20}
+            width={18}
+            height={18}
             className="inline mr-2"
           />
           玩家作答情况
@@ -37,14 +37,14 @@ export function PlayerAnswersTable({
           <table className="table table-pin-cols table-pin-rows">
             <thead>
               <tr>
-                <th className="w-4 text-end">顺序</th>
-                <th className="">玩家</th>
+                <th className="w-4 text-end text-xs sm:text-sm">顺序</th>
+                <th className="text-xs sm:text-sm">玩家</th>
                 {tagGroups.map((group) => (
-                  <th key={group.id} className="text-center min-w-20">
+                  <th key={group.id} className="text-center min-w-16 sm:min-w-20 text-xs sm:text-sm">
                     {group.name}
                   </th>
                 ))}
-                <th className="min-w-40">精确描述</th>
+                <th className="min-w-32 sm:min-w-40 text-xs sm:text-sm">精确描述</th>
               </tr>
             </thead>
             <tbody>
@@ -59,27 +59,27 @@ export function PlayerAnswersTable({
                           userId !== null && answer.playerId === userId,
                       })}
                     >
-                      <th className="text-end">{answer.order}</th>
-                      <th className="text-nowrap">{answer.username}</th>
+                      <th className="text-end text-xs sm:text-sm">{answer.order}</th>
+                      <th className="text-nowrap text-xs sm:text-sm">{answer.username}</th>
                       {tagGroups.map((group) => {
                         const selectedTagId = answer.answers?.[group.id];
                         const selectedTag = group.tags.find(
                           (tag) => tag.id === selectedTagId,
                         );
                         return (
-                          <td key={group.id} className="text-center">
+                          <td key={group.id} className="text-center text-xs sm:text-sm">
                             {selectedTag ? selectedTag.name : "-"}
                           </td>
                         );
                       })}
-                      <td className="max-w-40 truncate">
+                      <td className="max-w-32 sm:max-w-40 truncate text-xs sm:text-sm">
                         {answer.description || "-"}
                       </td>
                     </tr>
                   ))
               ) : (
                 <tr>
-                  <td colSpan={tagGroups.length + 3} className="text-center">
+                  <td colSpan={tagGroups.length + 3} className="text-center text-xs sm:text-sm">
                     暂无作答记录
                   </td>
                 </tr>

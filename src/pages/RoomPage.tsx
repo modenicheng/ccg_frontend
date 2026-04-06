@@ -2706,6 +2706,21 @@ function RoomPage() {
     }, ROOM_ID_COPY_FEEDBACK_MS);
   }, [roomId]);
 
+  const handleCopyJoinLink = useCallback(async () => {
+    if (!roomId) {
+      return;
+    }
+
+    const joinLink = `http://ccg.modenc.top/join/${roomId}`;
+    try {
+      await copyTextToClipboard(joinLink);
+      pushToast({ message: "已复制快速加入链接", variant: "success" });
+    } catch (error) {
+      console.error("Failed to copy join link:", error);
+      pushToast({ message: "复制链接失败", variant: "error" });
+    }
+  }, [roomId, pushToast]);
+
   useEffect(() => {
     return () => {
       if (volumeToastHideTimerRef.current !== null) {
@@ -2840,7 +2855,7 @@ function RoomPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 max-w-400 mx-auto">
+    <div className="flex flex-col gap-2 sm:gap-4 p-2 sm:p-4 max-w-400 mx-auto w-full">
       <ConnectionStatusBar
         isConnected={isConnected}
         latencyAvg={latencyAvg}
@@ -2850,7 +2865,8 @@ function RoomPage() {
         progressBarRef={progressBarRef}
       />
 
-      <div className="flex gap-2 w-full">
+      {/* 顶部区域：曲目信息 + 控制按钮 + 房间信息（手机端改为纵向） */}
+      <div className="flex flex-col sm:flex-row gap-2 w-full">
         <SongInfoCard
           songInfo={currentSong}
           isJudging={isJudging}
@@ -2879,10 +2895,12 @@ function RoomPage() {
           roomOwner={roomOwner}
           roomIdCopyState={roomIdCopyState}
           onCopyRoomId={handleCopyRoomId}
+          onCopyJoinLink={handleCopyJoinLink}
         />
       </div>
 
-      <div className="flex gap-2 w-full">
+      {/* 中部区域：抢答键 + 排行榜 + 玩家列表（手机端改为纵向） */}
+      <div className="flex flex-col sm:flex-row gap-2 w-full">
         <BuzzButton
           isConnected={isConnected}
           isCurrentPlayerInAnswerQueue={isCurrentPlayerInAnswerQueue}

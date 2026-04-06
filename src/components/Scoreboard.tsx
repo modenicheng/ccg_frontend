@@ -13,8 +13,8 @@ interface ScoreboardProps {
 
 export function Scoreboard({ scores, userId }: ScoreboardProps) {
   return (
-    <div className="card shadow-sm flex-1 min-h-56">
-      <div className="card-body overflow-auto p-0">
+    <div className="card shadow-sm w-full sm:flex-1 min-h-56">
+      <div className="card-body overflow-auto p-0 max-h-64">
         <table className="table table-pin-cols table-pin-rows">
           <thead>
             <tr>
@@ -35,14 +35,14 @@ export function Scoreboard({ scores, userId }: ScoreboardProps) {
                         userId !== null && player.player_id === userId,
                     })}
                   >
-                    <th className="text-end">{index + 1}</th>
-                    <th className="text-nowrap">{player.username}</th>
-                    <td className="text-end">{player.score}</td>
+                    <th className="text-end text-xs sm:text-base">{index + 1}</th>
+                    <th className="text-nowrap text-xs sm:text-base">{player.username}</th>
+                    <td className="text-end text-xs sm:text-base">{player.score}</td>
                   </tr>
                 ))
             ) : (
               <tr>
-                <td colSpan={3} className="text-center">
+                <td colSpan={3} className="text-center text-xs sm:text-base">
                   暂无得分记录
                 </td>
               </tr>

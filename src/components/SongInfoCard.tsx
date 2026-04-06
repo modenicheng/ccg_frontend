@@ -48,30 +48,30 @@ export function SongInfoCard({
   void _isJudging;
   if (!songInfo) {
     return (
-      <div className={clsx("card shadow-sm flex-1", className)}>
+      <div className={clsx("card shadow-sm w-full sm:flex-1", className)}>
         <div className="card-body">
           <div className="flex flex-row gap-4">
             <figure>
               <img
-                className="h-32 rounded-md"
+                className="h-24 sm:h-32 rounded-md flex-shrink-0"
                 src={defaultCoverUrl}
                 alt="未知曲目"
               />
             </figure>
-            <div className="flex flex-col gap-1">
-              <h2 className="text-2xl font-semibold">
+            <div className="flex flex-col gap-1 min-w-0 flex-1">
+              <h2 className="text-lg sm:text-2xl font-semibold truncate">
                 {compact ? "????????????????" : "未知曲目"}
               </h2>
               {showAlbum && (
-                <h2 className="text-lg">
+                <h2 className="text-base sm:text-lg truncate">
                   {compact ? "????????????????" : "未知专辑"}
                 </h2>
               )}
-              <div className="text-md mt-4 opacity-70">
+              <div className="text-sm sm:text-md mt-2 sm:mt-4 opacity-70 truncate">
                 {compact ? "????????" : "未知艺术家"}
               </div>
               {!compact && showAlbum && (
-                <div className="text-md opacity-70">
+                <div className="text-sm sm:text-md opacity-70 truncate">
                   {compact ? "????????????????????????" : "未知专辑信息"}
                 </div>
               )}
@@ -92,41 +92,41 @@ export function SongInfoCard({
     <div className={clsx("flex flex-row gap-4", { "items-center": compact })}>
       <figure>
         <img
-          className={clsx("rounded-md", {
-            "h-32": !compact,
-            "h-24": compact,
+          className={clsx("rounded-md flex-shrink-0", {
+            "h-24 sm:h-32": !compact,
+            "h-20 sm:h-24": compact,
           })}
           src={songInfo.coverUrl || defaultCoverUrl}
           alt={`${songInfo.title} - ${songInfo.artist}`}
         />
       </figure>
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 min-w-0 flex-1">
         <h2
-          className={clsx("font-semibold", {
-            "text-2xl": !compact,
-            "text-xl": compact,
+          className={clsx("font-semibold truncate", {
+            "text-lg sm:text-2xl": !compact,
+            "text-base sm:text-xl": compact,
           })}
         >
           {songInfo.title}
         </h2>
         {showAlbum && (
-          <h3 className={clsx({ "text-lg": !compact, "text-md": compact })}>
+          <h3 className={clsx("truncate", { "text-base sm:text-lg": !compact, "text-sm sm:text-md": compact })}>
             {songInfo.album}
           </h3>
         )}
         <div
-          className={clsx("opacity-70", {
-            "text-md mt-4": !compact,
-            "text-sm mt-2": compact,
+          className={clsx("opacity-70 truncate", {
+            "text-sm sm:text-md mt-2 sm:mt-4": !compact,
+            "text-xs sm:text-sm mt-1 sm:mt-2": compact,
           })}
         >
           {songInfo.artist}
         </div>
         {!compact && showAlbum && (
-          <div className="text-md opacity-70">{songInfo.album}</div>
+          <div className="text-sm sm:text-md opacity-70 truncate">{songInfo.album}</div>
         )}
         {!compact && songInfo.platformUrl && showPlatformHint && (
-          <div className="text-sm text-blue-500 mt-2">点击查看曲目详情</div>
+          <div className="text-xs sm:text-sm text-blue-500 mt-1 sm:mt-2 truncate">点击查看曲目详情</div>
         )}
       </div>
     </div>

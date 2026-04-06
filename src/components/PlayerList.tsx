@@ -32,15 +32,15 @@ export function PlayerList({
   onRemovePlayer,
 }: PlayerListProps) {
   return (
-    <div className="card shadow-sm w-1/4 max-w-sm min-w-3xs">
-      <div className="card-body p-2">
+    <div className="card shadow-sm w-full sm:w-1/4 sm:max-w-sm min-w-3xs">
+      <div className="card-body p-2 max-h-96 overflow-auto">
         <ul className="list gap-2">
           <li className="list-row">
-            <h2 className="font-semibold flex items-center text-lg">
+            <h2 className="font-semibold flex items-center text-base sm:text-lg">
               <Icon
                 icon="heroicons:users"
-                width={24}
-                height={24}
+                width={20}
+                height={20}
                 className="inline mr-1"
               />
               玩家列表
@@ -77,7 +77,7 @@ export function PlayerList({
               );
             })
           ) : (
-            <li className="list-row px-2 text-sm opacity-60">
+            <li className="list-row px-2 text-xs sm:text-sm opacity-60">
               暂无玩家
             </li>
           )}
