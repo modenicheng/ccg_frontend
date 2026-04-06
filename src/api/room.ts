@@ -60,6 +60,7 @@ export interface RoomInfoResponse {
   tagGroups: Record<string, string[]>;
   playProgress: number;
   startPositionPercent?: number;
+  playersDetailed?: Array<{ id: number; username: string; is_owner: boolean }>;
 }
 
 export interface PatchRoomRequest {
