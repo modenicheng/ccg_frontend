@@ -5,7 +5,12 @@ import { TagList } from "../components";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import type { RoomState } from "../types/store";
 import useWebSocketStore from "../stores/webSocketStore";
-import { getRoomInfo, patchRoomInfo, type RoomInfoResponse } from "../api/room";
+import {
+  getRoomInfo,
+  patchRoomInfo,
+  setRoomTestAudio,
+  type RoomInfoResponse,
+} from "../api/room";
 import {
   createTagGroup,
   createTags,
@@ -221,6 +226,7 @@ const RoomManagePage = () => {
   const [isCreatingSonglist, setIsCreatingSonglist] = useState(false);
   const [isPollingTask, setIsPollingTask] = useState(false);
   const pollingRef = useRef<number | null>(null);
+  const testAudioRequestVersionRef = useRef(0);
   const [pendingDeleteSonglistId, setPendingDeleteSonglistId] = useState<
     number | null
   >(null);
@@ -242,6 +248,14 @@ const RoomManagePage = () => {
   const [testAudioSongsTotal, setTestAudioSongsTotal] = useState(0);
   const [testAudioSongsPage, setTestAudioSongsPage] = useState(1);
   const [isLoadingTestAudioSongs, setIsLoadingTestAudioSongs] = useState(false);
+  const [isSwitchingTestAudio, setIsSwitchingTestAudio] = useState(false);
+  const [testAudioTaskId, setTestAudioTaskId] = useState<string | null>(null);
+  const [testAudioTaskStatus, setTestAudioTaskStatus] = useState<string | null>(
+    null,
+  );
+  const [testAudioTargetSongId, setTestAudioTargetSongId] = useState<
+    number | null
+  >(null);
 
   // 房间歌曲状态
   const [roomSongs, setRoomSongs] = useState<RoomSong[]>([]);
@@ -506,6 +520,7 @@ const RoomManagePage = () => {
         window.clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
+      testAudioRequestVersionRef.current += 1;
     };
   }, []);
 
@@ -617,6 +632,80 @@ const RoomManagePage = () => {
     const testAudioChanged = testAudioSongId !== initialTestAudioSongId;
     return titleChanged || selectedChanged || testAudioChanged;
   }, [initialSelectedIds, initialTestAudioSongId, initialTitle, selectedTagGroupIds, testAudioSongId, title]);
+
+  const isUiBlockedByTestAudioTask = isSwitchingTestAudio;
+
+  const applyTestAudioWithPolling = useCallback(
+    async (
+      songDbId: number,
+      options: { closeDialogOnSuccess: boolean } = { closeDialogOnSuccess: true },
+    ) => {
+      if (!roomid || isSwitchingTestAudio) {
+        return false;
+      }
+
+      const requestVersion = testAudioRequestVersionRef.current + 1;
+      testAudioRequestVersionRef.current = requestVersion;
+
+      setIsSwitchingTestAudio(true);
+      setTestAudioTargetSongId(songDbId);
+      setTestAudioTaskId(null);
+      setTestAudioTaskStatus(null);
+      setSongManageError(null);
+
+      let hasShownTaskHint = false;
+
+      try {
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          const response = await setRoomTestAudio(roomid, songDbId);
+
+          if (testAudioRequestVersionRef.current !== requestVersion) {
+            return false;
+          }
+
+          if (response.status === "task") {
+            setTestAudioTaskId(response.taskId);
+            setTestAudioTaskStatus(response.taskStatus);
+            if (!hasShownTaskHint) {
+              setSongManageSuccess("服务器正在拉取音频文件，请稍候...");
+              hasShownTaskHint = true;
+            }
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 1500);
+            });
+            continue;
+          }
+
+          setTestAudioSongId(songDbId);
+          setInitialTestAudioSongId(songDbId);
+          setTestAudioTaskId(null);
+          setTestAudioTaskStatus(null);
+          setSongManageSuccess(
+            `已设置预热 BGM：${response.title || "歌曲"} (ID: ${songDbId})`,
+          );
+
+          if (options.closeDialogOnSuccess) {
+            setIsSettingTestAudio(false);
+          }
+
+          return true;
+        }
+
+        setSongManageError("等待音频拉取超时，请稍后重试");
+        return false;
+      } catch (error) {
+        setSongManageError((error as Error).message || "设置预热 BGM 失败");
+        return false;
+      } finally {
+        if (testAudioRequestVersionRef.current === requestVersion) {
+          setIsSwitchingTestAudio(false);
+          setTestAudioTargetSongId(null);
+          setTestAudioTaskStatus(null);
+        }
+      }
+    },
+    [isSwitchingTestAudio, roomid],
+  );
 
   const toggleTagGroup = (id: number) => {
     setSelectedTagGroupIds((prev) =>
@@ -992,28 +1081,13 @@ const RoomManagePage = () => {
       setInitialTitle(room.title ?? "");
       setInitialSelectedIds(selectedTagGroupIds);
 
-      // 如果 test_audio 已更改，调用 HTTP 端点设置（触发预下载和播放）
+      // 如果 test_audio 已更改，调用同一接口并轮询直到完成
       if (testAudioSongId !== initialTestAudioSongId && testAudioSongId !== null) {
-        try {
-          const response = await fetch(
-            `/api/room/${roomid}/set-test-audio${buildRoomAuthQueryString()}`,
-            {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ song_id: testAudioSongId }),
-            },
-          );
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log("Test audio updated via set-test-audio endpoint:", result);
-            setInitialTestAudioSongId(testAudioSongId);
-          } else {
-            const errorText = await response.text();
-            console.error("Failed to set test audio:", errorText);
-          }
-        } catch (error) {
-          console.error("Error setting test audio:", error);
+        const switched = await applyTestAudioWithPolling(testAudioSongId, {
+          closeDialogOnSuccess: false,
+        });
+        if (!switched) {
+          throw new Error("预热 BGM 设置未完成，请稍后重试");
         }
       }
 
@@ -1340,34 +1414,10 @@ const RoomManagePage = () => {
   };
 
   const handleSetTestAudio = async (songDbId: number) => {
-    if (!roomid) return;
-    
-    setIsSettingTestAudio(false);
-    
-    try {
-      // 调用 HTTP 端点设置 test_audio（触发预下载和播放）
-      const response = await fetch(
-        `/api/room/${roomid}/set-test-audio${buildRoomAuthQueryString()}`,
-        {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song_id: songDbId }),
-        },
-      );
-      
-      if (response.ok) {
-        const result = await response.json();
-        setTestAudioSongId(songDbId);
-        setSongManageSuccess(`已设置预热 BGM：${result.title || '歌曲'} (ID: ${songDbId})`);
-        console.log("Test audio set:", result);
-      } else {
-        const errorText = await response.text();
-        throw new Error(errorText || 'Failed to set test audio');
-      }
-    } catch (error) {
-      setSongManageError((error as Error).message || "设置预热 BGM 失败");
-      console.error("handleSetTestAudio failed:", error);
-    }
+    if (!roomid || isSwitchingTestAudio) return;
+    await applyTestAudioWithPolling(songDbId, {
+      closeDialogOnSuccess: true,
+    });
   };
 
   const handleRemoveSongsFromRoom = async (songIds: number[]) => {
@@ -1531,18 +1581,21 @@ const RoomManagePage = () => {
           <button
             className="btn btn-outline btn-sm"
             onClick={() => void handleOpenSongManageDialog()}
+            disabled={isUiBlockedByTestAudioTask}
           >
             管理歌曲 / 歌单
           </button>
           <button
             className="btn btn-outline btn-sm"
             onClick={handleOpenManageDialog}
+            disabled={isUiBlockedByTestAudioTask}
           >
             管理 Tag / TagGroup
           </button>
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => navigate(`/room/${roomid}`)}
+            disabled={isUiBlockedByTestAudioTask}
           >
             返回房间
           </button>
@@ -1563,6 +1616,7 @@ const RoomManagePage = () => {
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="输入房间标题"
                   maxLength={100}
+                  disabled={isUiBlockedByTestAudioTask}
                 />
                 <span>房间标题</span>
               </label>
@@ -1579,6 +1633,7 @@ const RoomManagePage = () => {
                         className={`btn btn-sm ${selected ? "btn-primary" : "btn-soft"}`}
                         onClick={() => toggleTagGroup(group.id)}
                         title={group.description || undefined}
+                        disabled={isUiBlockedByTestAudioTask}
                       >
                         {group.name}
                         <span className="badge badge-ghost badge-sm ml-1">
@@ -1619,7 +1674,7 @@ const RoomManagePage = () => {
                           type="button"
                           className="btn btn-xs btn-outline"
                           onClick={handleSelectAllRoomSongs}
-                          disabled={roomSongs.length === 0}
+                          disabled={roomSongs.length === 0 || isUiBlockedByTestAudioTask}
                         >
                           {selectedRoomSongIds.length === roomSongs.length &&
                           roomSongs.length > 0
@@ -1632,7 +1687,9 @@ const RoomManagePage = () => {
                           onClick={() =>
                             handleRemoveSongsFromRoom(selectedRoomSongIds)
                           }
-                          disabled={selectedRoomSongIds.length === 0}
+                          disabled={
+                            selectedRoomSongIds.length === 0 || isUiBlockedByTestAudioTask
+                          }
                         >
                           删除选中 ({selectedRoomSongIds.length})
                         </button>
@@ -1640,7 +1697,7 @@ const RoomManagePage = () => {
                           type="button"
                           className="btn btn-xs btn-warning btn-outline"
                           onClick={handleOpenClearRoomSongsConfirm}
-                          disabled={roomSongs.length === 0}
+                          disabled={roomSongs.length === 0 || isUiBlockedByTestAudioTask}
                         >
                           清空全部
                         </button>
@@ -1648,7 +1705,11 @@ const RoomManagePage = () => {
                           type="button"
                           className="btn btn-xs btn-info btn-outline"
                           onClick={() => void handleShuffleRoomSongs()}
-                          disabled={roomSongs.length === 0 || isShufflingRoomSongs}
+                          disabled={
+                            roomSongs.length === 0 ||
+                            isShufflingRoomSongs ||
+                            isUiBlockedByTestAudioTask
+                          }
                         >
                           {isShufflingRoomSongs ? "打乱中..." : "手动打乱"}
                         </button>
@@ -1667,6 +1728,7 @@ const RoomManagePage = () => {
                           }
                         }}
                         placeholder="搜索房间歌曲标题..."
+                        disabled={isUiBlockedByTestAudioTask}
                       />
                       <button
                         type="button"
@@ -1675,6 +1737,7 @@ const RoomManagePage = () => {
                           setRoomSongsPage(1);
                           void loadRoomSongs(1, roomSongSearchKw);
                         }}
+                        disabled={isUiBlockedByTestAudioTask}
                       >
                         搜索
                       </button>
@@ -1804,6 +1867,7 @@ const RoomManagePage = () => {
                     onClick={() => {
                       void handleOpenSongManageDialog("songlists");
                     }}
+                    disabled={isUiBlockedByTestAudioTask}
                   >
                     <Icon icon="mdi:playlist-music" className="text-lg" />
                     从歌单绑定歌曲
@@ -1814,6 +1878,7 @@ const RoomManagePage = () => {
                     onClick={() => {
                       void handleOpenSongManageDialog("songs");
                     }}
+                    disabled={isUiBlockedByTestAudioTask}
                   >
                     <Icon icon="mdi:music" className="text-lg" />
                     添加单曲到房间
@@ -1824,6 +1889,7 @@ const RoomManagePage = () => {
                     onClick={() => {
                       void handleOpenTestAudioDialog();
                     }}
+                    disabled={isUiBlockedByTestAudioTask}
                   >
                     <Icon icon="mdi:volume-high" className="text-lg" />
                     设置预热 BGM
@@ -1834,23 +1900,45 @@ const RoomManagePage = () => {
                     )}
                   </button>
                 </div>
+
+                {isSwitchingTestAudio ? (
+                  <div role="alert" className="alert alert-info alert-soft mt-3">
+                    <span className="loading loading-spinner loading-sm" />
+                    <span>
+                      服务器正在拉取音频文件，暂时禁止操作。
+                      {testAudioTaskId ? ` 任务ID：${testAudioTaskId}` : ""}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2 justify-end">
                 <button
                   className="btn btn-primary"
                   onClick={handleSaveSettings}
-                  disabled={isSaving || !hasChanges}
+                  disabled={isSaving || !hasChanges || isUiBlockedByTestAudioTask}
                 >
                   {isSaving ? "保存中..." : "保存设置"}
                 </button>
-                <button className="btn btn-success" onClick={handleStartGame}>
+                <button
+                  className="btn btn-success"
+                  onClick={handleStartGame}
+                  disabled={isUiBlockedByTestAudioTask}
+                >
                   开始游戏
                 </button>
-                <button className="btn btn-warning" onClick={handleEndGame}>
+                <button
+                  className="btn btn-warning"
+                  onClick={handleEndGame}
+                  disabled={isUiBlockedByTestAudioTask}
+                >
                   结束游戏
                 </button>
-                <button className="btn btn-error" onClick={handleDissolveRoom}>
+                <button
+                  className="btn btn-error"
+                  onClick={handleDissolveRoom}
+                  disabled={isUiBlockedByTestAudioTask}
+                >
                   解散房间
                 </button>
               </div>
@@ -1917,7 +2005,7 @@ const RoomManagePage = () => {
                           type="button"
                           className="btn btn-xs btn-error btn-outline"
                           onClick={() => handleKickUser(player.id)}
-                          disabled={isKicking === player.id}
+                          disabled={isKicking === player.id || isUiBlockedByTestAudioTask}
                         >
                           {isKicking === player.id ? "踢人中..." : "踢人"}
                         </button>
@@ -3066,11 +3154,12 @@ const RoomManagePage = () => {
                 value={testAudioSearchKw}
                 onChange={(e) => setTestAudioSearchKw(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' && !isSwitchingTestAudio) {
                     setTestAudioSongsPage(1);
                     void loadTestAudioSongs(1, testAudioSearchKw);
                   }
                 }}
+                disabled={isSwitchingTestAudio}
               />
               
               {/* 歌曲列表 */}
@@ -3110,10 +3199,19 @@ const RoomManagePage = () => {
                                 type="button"
                                 className="btn btn-xs btn-accent"
                                 onClick={() => {
-                                  handleSetTestAudio(song.id);
+                                  void handleSetTestAudio(song.id);
                                 }}
+                                disabled={isSwitchingTestAudio}
                               >
-                                设为 BGM
+                                {isSwitchingTestAudio &&
+                                testAudioTargetSongId === song.id ? (
+                                  <>
+                                    <span className="loading loading-spinner loading-xs" />
+                                    处理中...
+                                  </>
+                                ) : (
+                                  "设为 BGM"
+                                )}
                               </button>
                             </td>
                           </tr>
@@ -3142,7 +3240,7 @@ const RoomManagePage = () => {
                     onClick={() => {
                       void handleTestAudioSongsPageChange(testAudioSongsPage - 1);
                     }}
-                    disabled={testAudioSongsPage <= 1}
+                    disabled={testAudioSongsPage <= 1 || isSwitchingTestAudio}
                   >
                     上一页
                   </button>
@@ -3152,10 +3250,25 @@ const RoomManagePage = () => {
                     onClick={() => {
                       void handleTestAudioSongsPageChange(testAudioSongsPage + 1);
                     }}
-                    disabled={testAudioSongsPage >= Math.ceil(testAudioSongsTotal / roomSongsPageSize)}
+                    disabled={
+                      testAudioSongsPage >=
+                        Math.ceil(testAudioSongsTotal / roomSongsPageSize) ||
+                      isSwitchingTestAudio
+                    }
                   >
                     下一页
                   </button>
+                </div>
+              )}
+
+              {isSwitchingTestAudio && (
+                <div role="alert" className="alert alert-info alert-soft mt-4">
+                  <span className="loading loading-spinner loading-sm" />
+                  <span>
+                    服务器正在拉取音频文件，请稍候...
+                    {testAudioTaskStatus ? ` 当前状态：${testAudioTaskStatus}` : ""}
+                    {testAudioTaskId ? `（任务ID：${testAudioTaskId}）` : ""}
+                  </span>
                 </div>
               )}
               
@@ -3171,13 +3284,24 @@ const RoomManagePage = () => {
                 type="button"
                 className="btn btn-ghost"
                 onClick={() => setIsSettingTestAudio(false)}
+                disabled={isSwitchingTestAudio}
               >
-                关闭
+                {isSwitchingTestAudio ? "处理中..." : "关闭"}
               </button>
             </div>
           </div>
           <form method="dialog" className="modal-backdrop">
-            <button>close</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!isSwitchingTestAudio) {
+                  setIsSettingTestAudio(false);
+                }
+              }}
+              disabled={isSwitchingTestAudio}
+            >
+              close
+            </button>
           </form>
         </div>
       )}

@@ -71,6 +71,52 @@ export interface PatchRoomRequest {
   tagGroupIds?: number[];
 }
 
+export interface SetRoomTestAudioTaskResponse {
+  success: false;
+  status: "task";
+  taskId: string;
+  taskStatus: string;
+  songId: number;
+  title?: string | null;
+  message?: string;
+}
+
+export interface SetRoomTestAudioCompletedResponse {
+  success: true;
+  status: "completed";
+  songId: number;
+  title?: string | null;
+  taskId?: string | null;
+  message?: string;
+}
+
+export type SetRoomTestAudioResponse =
+  | SetRoomTestAudioTaskResponse
+  | SetRoomTestAudioCompletedResponse;
+
+interface BackendSetRoomTestAudioTaskResponse {
+  success: false;
+  status: "task";
+  task_id: string;
+  task_status: string;
+  song_id: number;
+  title?: string | null;
+  message?: string;
+}
+
+interface BackendSetRoomTestAudioCompletedResponse {
+  success: true;
+  status: "completed";
+  song_id: number;
+  title?: string | null;
+  task_id?: string | null;
+  message?: string;
+}
+
+type BackendSetRoomTestAudioResponse =
+  | BackendSetRoomTestAudioTaskResponse
+  | BackendSetRoomTestAudioCompletedResponse;
+
 
 interface BackendTagResponse {
   id: number;
@@ -228,6 +274,43 @@ export async function patchRoomInfo(
     },
   );
   return mapRoomInfo(data);
+}
+
+export async function setRoomTestAudio(
+  roomId: string,
+  songId: number,
+): Promise<SetRoomTestAudioResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  const { data } = await http.post<BackendSetRoomTestAudioResponse>(
+    `/api/room/${encodeURIComponent(roomId)}/set-test-audio`,
+    {
+      song_id: songId,
+    },
+    {
+      params: authQuery ?? undefined,
+    },
+  );
+
+  if (data.status === "task") {
+    return {
+      success: false,
+      status: "task",
+      taskId: data.task_id,
+      taskStatus: data.task_status,
+      songId: data.song_id,
+      title: data.title,
+      message: data.message,
+    };
+  }
+
+  return {
+    success: true,
+    status: "completed",
+    songId: data.song_id,
+    title: data.title,
+    taskId: data.task_id,
+    message: data.message,
+  };
 }
 
 
