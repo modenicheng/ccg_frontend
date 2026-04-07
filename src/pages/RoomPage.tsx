@@ -339,6 +339,7 @@ function RoomPage() {
   const sendPlaybackControlRef = useRef<
     (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => Promise<void>
   >(async () => {});
+  const playbackSyncSuppressionDepthRef = useRef<number>(0);
   const [audioState, setAudioState] = useState<string>("suspended");
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const currentAudioUrlRef = useRef<string | null>(null);
@@ -823,10 +824,18 @@ function RoomPage() {
         return;
       }
 
+      const shouldSuppressOutboundSync =
+        playbackSyncSuppressionDepthRef.current > 0 &&
+        (event === GameEventId.PLAY || event === GameEventId.PAUSE);
+
       if (event === GameEventId.PLAY) {
         await audioRef.current.resume();
       } else if (event === GameEventId.PAUSE) {
         await audioRef.current.pause();
+      }
+
+      if (shouldSuppressOutboundSync) {
+        return;
       }
 
       const latestRoomState = gameStore.getState().roomState;
@@ -1089,6 +1098,21 @@ function RoomPage() {
     [getCalibratedNow],
   );
 
+  const withPlaybackSyncSuppressed = useCallback(
+    async (task: () => Promise<void>) => {
+      playbackSyncSuppressionDepthRef.current += 1;
+      try {
+        await task();
+      } finally {
+        playbackSyncSuppressionDepthRef.current = Math.max(
+          0,
+          playbackSyncSuppressionDepthRef.current - 1,
+        );
+      }
+    },
+    [],
+  );
+
   const handleRecoverPlaybackWithGesture = useCallback(async () => {
     await handleAudioPromptClick(audioRef.current);
 
@@ -1108,10 +1132,16 @@ function RoomPage() {
       },
     };
 
-    applyRemoteProgress(pseudoMessage, true);
-    await audioRef.current?.resume();
+    await withPlaybackSyncSuppressed(async () => {
+      applyRemoteProgress(pseudoMessage, true);
+      await audioRef.current?.resume();
+    });
     setNeedsGesturePromptOnInit(false);
-  }, [applyRemoteProgress, handleAudioPromptClick]);
+  }, [
+    applyRemoteProgress,
+    handleAudioPromptClick,
+    withPlaybackSyncSuppressed,
+  ]);
 
   useEffect(() => {
     const markUserInteraction = () => {
@@ -1416,18 +1446,20 @@ function RoomPage() {
                 },
               } as PlayControlMessage;
 
-              applyRemoteProgress(pseudoMessage, true);
-
-              if (didLoadOrRebindAudio) {
-                await audioPlayer.waitForCanPlayThrough();
+              await withPlaybackSyncSuppressed(async () => {
                 applyRemoteProgress(pseudoMessage, true);
-              }
 
-              if (playbackStatus.play_state === "playing") {
-                await audioPlayer.resume();
-              } else if (playbackStatus.play_state === "paused") {
-                await audioPlayer.pause();
-              }
+                if (didLoadOrRebindAudio) {
+                  await audioPlayer.waitForCanPlayThrough();
+                  applyRemoteProgress(pseudoMessage, true);
+                }
+
+                if (playbackStatus.play_state === "playing") {
+                  await audioPlayer.resume();
+                } else if (playbackStatus.play_state === "paused") {
+                  await audioPlayer.pause();
+                }
+              });
 
               shouldForcePlaybackResyncRef.current = false;
             }
@@ -1524,11 +1556,13 @@ function RoomPage() {
 
           // 2. 先同步进度（失败则不改变播放状态）
           console.log("[PLAY_EVENT] Applying remote progress...");
-          applyRemoteProgress(message, true);
+          await withPlaybackSyncSuppressed(async () => {
+            applyRemoteProgress(message, true);
 
-          // 3. 同步播放状态（仅在进度同步成功后）
-          console.log("[PLAY_EVENT] Resuming audio...");
-          await audioRef.current?.resume();
+            // 3. 同步播放状态（仅在进度同步成功后）
+            console.log("[PLAY_EVENT] Resuming audio...");
+            await audioRef.current?.resume();
+          });
           console.log("[PLAY_EVENT] Audio resumed successfully");
           
           // 4. 清理 UI 状态
@@ -1884,10 +1918,12 @@ function RoomPage() {
           }
 
           // 1. 先同步进度（失败则不改变播放状态）
-          applyRemoteProgress(message, true);
+          await withPlaybackSyncSuppressed(async () => {
+            applyRemoteProgress(message, true);
 
-          // 2. 同步播放状态（仅在进度同步成功后）
-          await audioRef.current?.pause();
+            // 2. 同步播放状态（仅在进度同步成功后）
+            await audioRef.current?.pause();
+          });
         } catch (err) {
           console.error("[PAUSE_EVENT] Failed to apply PAUSE event:", err);
           await reportAudioError(
@@ -2171,7 +2207,9 @@ function RoomPage() {
         // 3. 回合开始后自动恢复播放
         if (audioRef.current) {
           try {
-            await audioRef.current.resume();
+            await withPlaybackSyncSuppressed(async () => {
+              await audioRef.current?.resume();
+            });
           } catch (error) {
             console.error("Failed to auto resume audio on round start:", error);
           }
@@ -2471,6 +2509,7 @@ function RoomPage() {
     wsAuthToken,
     wsAuthUsername,
     closeRoundSummaryDialog,
+    withPlaybackSyncSuppressed,
   ]);
 
   useEffect(() => {

@@ -131,7 +131,7 @@ src/
 - **Backend proxy**: Vite proxies `/api` and `/ws` to `localhost:8000` (see `vite.config.ts`).
 - **Environment variables**: Use `import.meta.env` (e.g., `VITE_BACKEND_ORIGIN`).
 - **Theme persistence**: The `persistStore` automatically saves theme/volume/users to localStorage.
-- **WebSocket connection**: Connects to `/ws/:roomid` (player) or `/ws/:roomid/watch` (spectator).
+- **WebSocket connection**: Player connects to `/ws/:roomid?token=...&user_id=...`; spectator connects to `/ws/:roomid/watch`.
 - **Binary protocols**: WebSocket uses binary frames for audio streaming (AudioFrame, HeartbeatFrame, TimeSyncFrame).
 - **Custom hooks**: Use `useIsOwner` to check room ownership, `useWindowFocus` for visibility detection.
 - **Error toasts**: ErrorToastStore supports error/success/info variants, max 6 toasts displayed.

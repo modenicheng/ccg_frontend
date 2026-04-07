@@ -1,5 +1,5 @@
 import clsx from "clsx";
-import { Icon } from "@iconify-icon/react";
+import { TrashIcon } from "@heroicons/react/24/outline";
 
 type UserBarProps = {
   username: string;
@@ -91,7 +91,7 @@ export const UserBar: React.FC<UserBarProps> = ({
                     aria-label={`踢出玩家 ${username}`}
                     title={`踢出 ${username}`}
                   >
-                    <Icon icon="heroicons:trash-2" width={14} height={14} />
+                    <TrashIcon className="size-4" aria-hidden="true" />
                   </button>
                 ) : null}
               </div>

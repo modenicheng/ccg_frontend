@@ -165,7 +165,7 @@ src/
 
 当前前端连接地址逻辑如下（见 `src/utils/wsEndpoint.ts`）：
 
-- 玩家端路径：`/ws/:roomid`（携带 `token` 查询参数）
+- 玩家端路径：`/ws/:roomid`（携带 `token` + `user_id` 查询参数）
 - 观战端路径：`/ws/:roomid/watch`
 - 开发环境（`import.meta.env.PROD === false`）：返回同源相对路径 `/ws/...`，由 Vite 代理到后端
 - 生产环境（`import.meta.env.PROD === true`）：固定连接 `wss://ccg-origin.modenc.top/ws/...`
@@ -261,8 +261,12 @@ Vite 开发服务器已配置代理：
 
 ### 认证机制
 
-房间认证信息存储在 cookie 和 sessionStorage 中，通过 `roomAuth.ts` 工具函数管理。
-Cookie 用于 WebSocket 握手认证，sessionStorage 用于前端状态恢复。
+房间认证信息通过 `roomAuth.ts` 进行管理：
+
+- `sessionStorage`：用于前端状态恢复与 WebSocket 鉴权参数来源
+- `cookie`：仅用于部分仍依赖 cookie 的 HTTP 接口兼容
+
+玩家 WebSocket 鉴权使用 URL query 参数：`token` 与 `user_id`，不依赖 cookie 握手。
 
 ### 错误处理
 
@@ -294,6 +298,7 @@ API 错误通过 Axios 拦截器统一处理，组件中通过 `errorToastStore`
 
 - 开发环境：确保后端服务已启动在 `localhost:8000`，并确认 Vite 代理配置存在 `/ws`。
 - 生产环境：确认页面可访问 `wss://ccg-origin.modenc.top/ws/...`（含反向代理与证书配置）。
+- 玩家连接请检查 query 参数是否完整：`token` 与 `user_id`。
 - 检查网络防火墙设置
 - 查看浏览器开发者工具网络面板
 
