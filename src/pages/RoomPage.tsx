@@ -58,8 +58,8 @@ import {
   getPlayersSimple,
   getTagGroupsSimple,
 } from "../types/wsMessages";
-import { syncRoomAuthCookie, syncRoomAuthToSession } from "../utils/roomAuth";
-import { readCookie, clearCookie, copyTextToClipboard, parseErrorMessage } from "../utils/common";
+import { syncRoomAuthToSession } from "../utils/roomAuth";
+import { clearCookie, copyTextToClipboard, parseErrorMessage } from "../utils/common";
 import { buildRoomWsUrl } from "../utils/wsEndpoint";
 
 const development = import.meta.env.DEV;
@@ -224,29 +224,18 @@ function RoomPage() {
     sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "",
     10,
   );
-  const fallbackUserIdFromCookie = Number.parseInt(
-    readCookie(`ccg-room-user-id:${roomId}`) ?? "",
-    10,
-  );
   const tokenFromSession =
     sessionStorage.getItem(`ccg-room-token:${roomId}`)?.trim() || null;
-  const tokenFromCookie = readCookie(`ccg-room-token:${roomId}`)?.trim() || null;
   const tokenFromPersist = user?.token?.trim() || null;
   const usernameFromSession =
     sessionStorage.getItem(`ccg-room-username:${roomId}`)?.trim() || null;
-  const usernameFromCookie =
-    readCookie(`ccg-room-username:${roomId}`)?.trim() || null;
   const usernameFromPersist = user?.username?.trim() || null;
-  const wsAuthToken = tokenFromSession ?? tokenFromCookie ?? tokenFromPersist;
-  const wsAuthUsername =
-    usernameFromSession ?? usernameFromCookie ?? usernameFromPersist;
+  const wsAuthToken = tokenFromSession ?? tokenFromPersist;
+  const wsAuthUsername = usernameFromSession ?? usernameFromPersist;
   const userId =
     user?.id ??
     (Number.isFinite(fallbackUserIdFromSession)
       ? fallbackUserIdFromSession
-      : null) ??
-    (Number.isFinite(fallbackUserIdFromCookie)
-      ? fallbackUserIdFromCookie
       : null);
 
   const [localVolume, setLocalVolume] = useState<number>(persistVolume);
@@ -1198,7 +1187,7 @@ function RoomPage() {
   }, [sendPlaybackControl]);
 
   useEffect(() => {
-    if (!roomId || !wsAuthToken) {
+    if (!roomId || !wsAuthToken || userId === null) {
       return;
     }
 
@@ -1211,10 +1200,9 @@ function RoomPage() {
         username: wsAuthUsername,
       };
       syncRoomAuthToSession(roomId, wsIdentity);
-      syncRoomAuthCookie(roomId, wsIdentity);
     }
 
-    const wsUrl = buildRoomWsUrl(roomId, wsAuthToken);
+    const wsUrl = buildRoomWsUrl(roomId, wsAuthToken, userId);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);

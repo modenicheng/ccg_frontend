@@ -20,11 +20,16 @@ const buildUrlByEnv = (pathname: string, search: string) => {
   return toSameOriginPath(pathname, search);
 };
 
-export const buildRoomWsUrl = (roomId: string, token: string | null) => {
+export const buildRoomWsUrl = (
+  roomId: string,
+  token: string,
+  userId: number,
+) => {
   const pathname = `/ws/${encodeURIComponent(roomId)}`;
-  const search = token
-    ? `?${new URLSearchParams({ token }).toString()}`
-    : "";
+  const search = `?${new URLSearchParams({
+    token,
+    user_id: `${userId}`,
+  }).toString()}`;
 
   return buildUrlByEnv(pathname, search);
 };
