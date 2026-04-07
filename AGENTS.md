@@ -1,6 +1,6 @@
-# Agent Guidelines for CCG Frontend
+# Agent Guidelines for GUESongS Frontend
 
-This document provides guidelines for AI agents working on the CCG frontend repository. It covers build commands, code style, conventions, and project-specific patterns.
+This document provides guidelines for AI agents working on the GUESongS frontend repository. It covers build commands, code style, conventions, and project-specific patterns.
 
 ## Build, Lint, and Test Commands
 
@@ -142,4 +142,4 @@ No `.cursorrules`, `.cursor/rules/`, or `.github/copilot‑instructions.md` file
 
 ---
 
-*This file is intended for AI agents working on the CCG frontend. Keep it updated as the project evolves.*
+*This file is intended for AI agents working on the GUESongS frontend. Keep it updated as the project evolves.*

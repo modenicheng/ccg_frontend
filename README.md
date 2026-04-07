@@ -1,6 +1,6 @@
-# CCG 前端
+# GUESongS 前端
 
-CCG 前端项目，基于 React + TypeScript + Vite 构建，使用 Tailwind CSS 4 + daisyUI 5 进行样式开发，状态管理采用 Zustand。这是一个实时多人音乐猜歌游戏前端，支持创建房间、加入游戏、观看比赛等功能。
+GUESongS 前端项目，基于 React + TypeScript + Vite 构建，使用 Tailwind CSS 4 + daisyUI 5 进行样式开发，状态管理采用 Zustand。这是一个实时多人音乐猜歌游戏前端，支持创建房间、加入游戏、观看比赛等功能。
 
 ## 快速开始
 
@@ -163,11 +163,12 @@ src/
 
 ## WebSocket 连接说明
 
-当前前端连接地址逻辑如下（见 `src/pages/RoomPage.tsx`）：
+当前前端连接地址逻辑如下（见 `src/utils/wsEndpoint.ts`）：
 
-- 连接路径：`/ws/:roomid`
-- 开发环境：默认连接 `http://localhost:8000` 对应的 WS（可通过 `VITE_BACKEND_ORIGIN` 覆盖）
-- 生产环境：同源连接
+- 玩家端路径：`/ws/:roomid`（携带 `token` 查询参数）
+- 观战端路径：`/ws/:roomid/watch`
+- 开发环境（`import.meta.env.PROD === false`）：返回同源相对路径 `/ws/...`，由 Vite 代理到后端
+- 生产环境（`import.meta.env.PROD === true`）：固定连接 `wss://ccg-origin.modenc.top/ws/...`
 
 开发模式下，Vite 已配置 `/api` 与 `/ws` 代理到后端 `localhost:8000`。
 
@@ -255,7 +256,8 @@ Vite 开发服务器已配置代理：
 
 使用 `import.meta.env` 访问环境变量：
 
-- `VITE_BACKEND_ORIGIN`：后端地址（开发环境）
+- 当前 WebSocket 连接无需额外环境变量。
+- 开发默认同源（`/ws/...`）+ Vite 代理；生产固定 `ccg-origin.modenc.top`。
 
 ### 认证机制
 
@@ -290,7 +292,8 @@ API 错误通过 Axios 拦截器统一处理，组件中通过 `errorToastStore`
 
 ### 3) WebSocket 连接失败
 
-- 确保后端服务已启动在 `localhost:8000`
+- 开发环境：确保后端服务已启动在 `localhost:8000`，并确认 Vite 代理配置存在 `/ws`。
+- 生产环境：确认页面可访问 `wss://ccg-origin.modenc.top/ws/...`（含反向代理与证书配置）。
 - 检查网络防火墙设置
 - 查看浏览器开发者工具网络面板
 
