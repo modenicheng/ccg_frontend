@@ -53,7 +53,7 @@ export function SongInfoCard({
     return (
       <div
         className={clsx(
-          "card shadow-sm w-full sm:w-auto sm:flex-1 min-w-0 h-full",
+          "card shadow-sm w-full sm:w-auto sm:flex-1 min-w-xs h-full",
           className,
         )}
       >

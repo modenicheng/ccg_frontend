@@ -26,7 +26,7 @@ export function RoomInfo({
       : `/join/${roomId}`;
 
   return (
-    <div className="card shadow-sm md:w-1/4 md:min-w-sm sm:w-full">
+    <div className="card shadow-sm md:w-1/4 md:min-w-3xs sm:w-full">
       <div className="card-body h-full">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold flex items-center min-w-0 flex-1">
