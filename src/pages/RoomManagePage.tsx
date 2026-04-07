@@ -47,6 +47,7 @@ import {
 } from "../api/room_songs";
 import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 const readCookie = (name: string): string | null => {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -102,6 +103,16 @@ const RoomManagePage = () => {
   );
 
   const roomId = roomid?.trim() ?? "";
+  const buildRoomAuthQueryString = useCallback(() => {
+    if (!roomId) {
+      return "";
+    }
+    const authQuery = getRoomAuthQueryParams(roomId);
+    if (!authQuery) {
+      return "";
+    }
+    return `?${new URLSearchParams(authQuery).toString()}`;
+  }, [roomId]);
   const sessionUserId = Number.parseInt(
     roomId ? sessionStorage.getItem(`ccg-room-user-id:${roomId}`) ?? "" : "",
     10,
@@ -984,11 +995,14 @@ const RoomManagePage = () => {
       // 如果 test_audio 已更改，调用 HTTP 端点设置（触发预下载和播放）
       if (testAudioSongId !== initialTestAudioSongId && testAudioSongId !== null) {
         try {
-          const response = await fetch(`/api/room/${roomid}/set-test-audio`, {
+          const response = await fetch(
+            `/api/room/${roomid}/set-test-audio${buildRoomAuthQueryString()}`,
+            {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ song_id: testAudioSongId }),
-          });
+            },
+          );
           
           if (response.ok) {
             const result = await response.json();
@@ -1060,9 +1074,12 @@ const RoomManagePage = () => {
   const handleConfirmDissolveRoom = async () => {
     try {
       // 调用解散房间 API
-      await fetch(`/api/room/${encodeURIComponent(roomid!)}/dissolve`, {
+      await fetch(
+        `/api/room/${encodeURIComponent(roomid!)}/dissolve${buildRoomAuthQueryString()}`,
+        {
         method: 'DELETE',
-      });
+        },
+      );
 
       setSuccess("房间已解散");
       dissolveRoomConfirmDialogRef.current?.close();
@@ -1329,11 +1346,14 @@ const RoomManagePage = () => {
     
     try {
       // 调用 HTTP 端点设置 test_audio（触发预下载和播放）
-      const response = await fetch(`/api/room/${roomid}/set-test-audio`, {
+      const response = await fetch(
+        `/api/room/${roomid}/set-test-audio${buildRoomAuthQueryString()}`,
+        {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ song_id: songDbId }),
-      });
+        },
+      );
       
       if (response.ok) {
         const result = await response.json();

@@ -1,3 +1,5 @@
+import usePersistStore from "../stores/persistStore";
+
 type RoomAuthIdentity = {
   id: number;
   username: string;
@@ -41,6 +43,53 @@ const getRoomAuthKeys = (roomId: string) => {
     tokenKey: `${ROOM_TOKEN_PREFIX}${normalizedRoomId}`,
     userIdKey: `${ROOM_USER_ID_PREFIX}${normalizedRoomId}`,
     usernameKey: `${ROOM_USERNAME_PREFIX}${normalizedRoomId}`,
+  };
+};
+
+const readCookie = (name: string): string | null => {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matched = document.cookie.match(
+    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
+  );
+  if (!matched) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(matched[1]);
+  } catch {
+    return matched[1];
+  }
+};
+
+export const getRoomAuthQueryParams = (
+  roomId: string,
+): { token: string; user_id: string } | null => {
+  const { normalizedRoomId, tokenKey, userIdKey } = getRoomAuthKeys(roomId);
+  if (!normalizedRoomId) {
+    return null;
+  }
+
+  const persistedRoomUser =
+    usePersistStore.getState().getRoomUser(normalizedRoomId) ?? null;
+  const tokenFromPersist = persistedRoomUser?.token?.trim() || null;
+  const userIdFromPersist =
+    persistedRoomUser != null ? `${persistedRoomUser.id}`.trim() : null;
+
+  const tokenFromSession = sessionStorage.getItem(tokenKey)?.trim() || null;
+  const tokenFromCookie = readCookie(tokenKey)?.trim() || null;
+  const token = tokenFromSession ?? tokenFromCookie ?? tokenFromPersist;
+
+  const userIdFromSession = sessionStorage.getItem(userIdKey)?.trim() || null;
+  const userIdFromCookie = readCookie(userIdKey)?.trim() || null;
+  const userId = userIdFromSession ?? userIdFromCookie ?? userIdFromPersist;
+
+  if (!token || !userId) {
+    return null;
+  }
+
+  return {
+    token,
+    user_id: userId,
   };
 };
 

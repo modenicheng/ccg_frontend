@@ -164,6 +164,7 @@ export interface AnswerBroadcastMessage {
 
 export interface JudgingMessageData {
   song?: {
+    id?: number;
     title?: string;
     artist?: string;
     album?: string;

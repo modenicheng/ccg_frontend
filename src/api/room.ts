@@ -1,4 +1,5 @@
 import { http } from "./http";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 export interface CreateRoomRequest {
   title: string;
@@ -197,8 +198,12 @@ export async function joinRoom(
 }
 
 export async function getRoomInfo(roomId: string): Promise<RoomInfoResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.get<BackendRoomInfoResponse>(
     `/api/room/${encodeURIComponent(roomId)}`,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return mapRoomInfo(data);
 }
@@ -207,6 +212,7 @@ export async function patchRoomInfo(
   roomId: string,
   payload: PatchRoomRequest,
 ): Promise<RoomInfoResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const backendPayload: BackendPatchRoomRequest = {
     song_queue: payload.song_queue,
     title: payload.title,
@@ -217,6 +223,9 @@ export async function patchRoomInfo(
   const { data } = await http.patch<BackendRoomInfoResponse>(
     `/api/room/${encodeURIComponent(roomId)}`,
     backendPayload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return mapRoomInfo(data);
 }

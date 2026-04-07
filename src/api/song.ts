@@ -114,3 +114,131 @@ export async function updateSong(
 export async function deleteSong(songId: number): Promise<void> {
   await http.delete(`/api/songs/${songId}`);
 }
+
+interface BackendSongTagHistoryOption {
+  tag_id: number;
+  tag_name: string;
+  selected_count: number;
+}
+
+interface BackendSongTagGroupHistoryItem {
+  group_id: number;
+  group_name: string;
+  tags: BackendSongTagHistoryOption[];
+}
+
+interface BackendSongTagHistorySummaryResponse {
+  song_id: number;
+  groups: BackendSongTagGroupHistoryItem[];
+}
+
+interface BackendSongTagHistoryRecord {
+  history_id: number;
+  room_id: string | null;
+  judged_by_user_id: number | null;
+  judged_by_username: string | null;
+  created_at: string;
+}
+
+interface BackendSongTagHistoryDetailResponse {
+  song_id: number;
+  tag_id: number;
+  tag_name: string;
+  group_id: number | null;
+  group_name: string | null;
+  total: number;
+  records: BackendSongTagHistoryRecord[];
+}
+
+export interface SongTagHistoryOption {
+  tagId: number;
+  tagName: string;
+  selectedCount: number;
+}
+
+export interface SongTagGroupHistoryItem {
+  groupId: number;
+  groupName: string;
+  tags: SongTagHistoryOption[];
+}
+
+export interface SongTagHistorySummary {
+  songId: number;
+  groups: SongTagGroupHistoryItem[];
+}
+
+export interface SongTagHistoryRecord {
+  historyId: number;
+  roomId: string | null;
+  judgedByUserId: number | null;
+  judgedByUsername: string | null;
+  createdAt: string;
+}
+
+export interface SongTagHistoryDetail {
+  songId: number;
+  tagId: number;
+  tagName: string;
+  groupId: number | null;
+  groupName: string | null;
+  total: number;
+  records: SongTagHistoryRecord[];
+}
+
+const mapSongTagHistorySummary = (
+  payload: BackendSongTagHistorySummaryResponse,
+): SongTagHistorySummary => ({
+  songId: payload.song_id,
+  groups: (payload.groups ?? []).map((group) => ({
+    groupId: group.group_id,
+    groupName: group.group_name,
+    tags: (group.tags ?? []).map((tag) => ({
+      tagId: tag.tag_id,
+      tagName: tag.tag_name,
+      selectedCount: tag.selected_count,
+    })),
+  })),
+});
+
+const mapSongTagHistoryDetail = (
+  payload: BackendSongTagHistoryDetailResponse,
+): SongTagHistoryDetail => ({
+  songId: payload.song_id,
+  tagId: payload.tag_id,
+  tagName: payload.tag_name,
+  groupId: payload.group_id,
+  groupName: payload.group_name,
+  total: payload.total,
+  records: (payload.records ?? []).map((record) => ({
+    historyId: record.history_id,
+    roomId: record.room_id,
+    judgedByUserId: record.judged_by_user_id,
+    judgedByUsername: record.judged_by_username,
+    createdAt: record.created_at,
+  })),
+});
+
+export async function getSongTagHistorySummary(
+  songId: number,
+): Promise<SongTagHistorySummary> {
+  const { data } = await http.get<BackendSongTagHistorySummaryResponse>(
+    `/api/songs/${songId}/history/tags`,
+  );
+  return mapSongTagHistorySummary(data);
+}
+
+export async function getSongTagHistoryDetail(
+  songId: number,
+  tagId: number,
+  groupId?: number,
+): Promise<SongTagHistoryDetail> {
+  const { data } = await http.get<BackendSongTagHistoryDetailResponse>(
+    `/api/songs/${songId}/history/tags/${tagId}/records`,
+    {
+      params: {
+        group_id: groupId,
+      },
+    },
+  );
+  return mapSongTagHistoryDetail(data);
+}

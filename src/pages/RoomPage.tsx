@@ -261,6 +261,7 @@ function RoomPage() {
     coverUrl: string;
     platformUrl?: string;
   } | null>(null);
+  const [currentSongId, setCurrentSongId] = useState<number | null>(null);
   const [selectedTags, setSelectedTags] = useState<
     Record<number, number | null>
   >({});
@@ -1000,6 +1001,7 @@ function RoomPage() {
     setReferenceDescriptions([]);
     setPlayerDescriptions([]);
     setCurrentSong(null);
+    setCurrentSongId(null);
     setIsJudging(false);
     setHasJudgingSubmitted(false);
 
@@ -1706,6 +1708,7 @@ function RoomPage() {
       ts: number;
       data: {
         song?: {
+          id?: number;
           title?: string;
           artist?: string;
           album?: string;
@@ -1739,6 +1742,7 @@ function RoomPage() {
       const latestAnswerQueue = gameStore.getState().roomState?.answer_queue ?? [];
       // 判分时显示完整曲目信息
       if (message.data?.song) {
+        setCurrentSongId(message.data.song.id ?? null);
         setCurrentSong({
           title: message.data.song.title || "",
           artist: message.data.song.artist || "",
@@ -1746,6 +1750,8 @@ function RoomPage() {
           coverUrl: message.data.song.cover_url || "",
           platformUrl: message.data.song.platform_url || undefined,
         });
+      } else {
+        setCurrentSongId(null);
       }
 
       // 存储历史标签ID
@@ -2234,6 +2240,7 @@ function RoomPage() {
         setIsJudging(false);
         setHasJudgingSubmitted(false);
         setCurrentSong(null);
+        setCurrentSongId(null);
 
         // 5. 可选：更新回合索引到状态存储（如果需要显示）
         // gameStore.getState().setRoundIndex(roundData.round_index);
@@ -3042,6 +3049,7 @@ function RoomPage() {
         dialogRef={judgingDialogRef}
         confirmAnswerDialogRef={confirmAnswerDialogRef}
         currentSong={currentSong}
+        currentSongId={currentSongId}
         tagGroups={tagGroups}
         selectedTags={selectedTags}
         selectedDescriptions={selectedDescriptions}

@@ -1,6 +1,7 @@
 import { http } from "./http";
 import { mapSong } from "./song";
 import type { Song } from "./song";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 // Local copy of BackendSong interface to avoid import issues
 interface BackendSong {
@@ -63,10 +64,11 @@ export async function getRoomSongs(
   params: RoomSongsListParams = {},
 ): Promise<RoomSongsListResponse> {
   const { offset = 0, limit = 20, kw } = params;
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.get<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/`,
     {
-      params: { offset, limit, kw },
+      params: { offset, limit, kw, ...(authQuery ?? {}) },
     },
   );
   const songs = data.list || [];
@@ -87,9 +89,13 @@ export async function addSongsToRoom(
   roomId: string,
   payload: AddRoomSongsRequest,
 ): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.post<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/`,
     payload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -106,9 +112,13 @@ export async function removeSongsFromRoom(
   roomId: string,
   payload: RemoveRoomSongsRequest,
 ): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.delete<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/`,
-    { data: payload },
+    {
+      data: payload,
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -126,9 +136,13 @@ export async function updateRoomSongOrder(
   roomId: string,
   payload: UpdateRoomSongOrderRequest,
 ): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.put<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/order`,
     payload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -145,9 +159,13 @@ export async function batchUpdateRoomSongOrder(
   roomId: string,
   payload: BatchUpdateRoomSongOrderRequest,
 ): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.put<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/order/batch`,
     payload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -157,8 +175,12 @@ export async function batchUpdateRoomSongOrder(
 }
 
 export async function clearRoomSongs(roomId: string): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.delete<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/all`,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -168,8 +190,13 @@ export async function clearRoomSongs(roomId: string): Promise<RoomSongsListRespo
 }
 
 export async function shuffleRoomSongs(roomId: string): Promise<RoomSongsListResponse> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.post<BackendRoomSongsListResponse>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/shuffle`,
+    undefined,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return {
     room_id: data.room_id,
@@ -182,8 +209,12 @@ export async function getRoomSongDetail(
   roomId: string,
   songId: number,
 ): Promise<RoomSong> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.get<BackendRoomSong>(
     `/api/rooms/${encodeURIComponent(roomId)}/songs/${songId}`,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return mapRoomSong(data);
 }
