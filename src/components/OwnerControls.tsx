@@ -16,7 +16,6 @@ interface OwnerControlsProps {
   onSkipRound: () => void;
   onEndRound: () => void;
   onShowSong: () => void;
-  roomId: string;
 }
 
 export function OwnerControls({
@@ -32,7 +31,6 @@ export function OwnerControls({
   onSkipRound,
   onEndRound,
   onShowSong,
-  roomId,
 }: OwnerControlsProps) {
   const nextRoundConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
 
@@ -58,7 +56,7 @@ export function OwnerControls({
 
   return (
     <div className="card shadow-sm min-w-xs">
-      <div className="card-body user-drag-none">
+      <div className="card-body p-3 gap-1.5 user-drag-none min-w-xs">
         <button
           type="button"
           className={clsx("btn btn-sm btn-soft", {
@@ -136,14 +134,6 @@ export function OwnerControls({
           <Icon icon="heroicons:eye" width={16} height={16} />
           展示答案
         </button>
-        <a
-          className="btn btn-sm  btn-soft"
-          href={`/room/${roomId}/manage`}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          管理页面
-        </a>
 
         <dialog ref={nextRoundConfirmDialogRef} className="modal">
           <div className="modal-box max-w-md">

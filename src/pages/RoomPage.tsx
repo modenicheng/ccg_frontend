@@ -2947,11 +2947,12 @@ function RoomPage() {
       />
 
       {/* 顶部区域：曲目信息 + 控制按钮 + 房间信息（手机端改为纵向） */}
-      <div className="flex flex-col sm:flex-row gap-2 w-full">
+      <div className="flex flex-col sm:flex-row sm:items-stretch gap-2 w-full h-full">
         <SongInfoCard
           songInfo={currentSong}
           isJudging={isJudging}
           compact={true}
+          compactLarge={true}
           className="flex-1"
           showAlbum={true}
         />
@@ -2968,12 +2969,12 @@ function RoomPage() {
           onSkipRound={handleSkipRound}
           onEndRound={handleEndRound}
           onShowSong={handleShowSong}
-          roomId={roomId}
         />
         <RoomInfo
           roomId={roomId}
           roomTitle={roomState?.title}
           roomOwner={roomOwner}
+          managePageHref={isOwner ? `/room/${roomId}/manage` : undefined}
           roomIdCopyState={roomIdCopyState}
           onCopyRoomId={handleCopyRoomId}
           onCopyJoinLink={handleCopyJoinLink}

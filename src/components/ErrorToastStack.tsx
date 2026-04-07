@@ -104,7 +104,7 @@ export function ErrorToastStack() {
   }
 
   return (
-    <div className="toast toast-top toast-center z-50">
+    <div className="toast toast-top toast-center z-120">
       <div className="stack w-[min(92vw,32rem)]">
         {toasts
           .slice()

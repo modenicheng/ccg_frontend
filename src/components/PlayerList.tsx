@@ -32,8 +32,8 @@ export function PlayerList({
   onRemovePlayer,
 }: PlayerListProps) {
   return (
-    <div className="card shadow-sm w-full sm:w-1/4 sm:max-w-sm min-w-3xs">
-      <div className="card-body p-2 max-h-96 overflow-auto">
+    <div className="card shadow-sm w-full sm:w-1/4 sm:max-w-sm min-w-3xs sm:max-h-112">
+      <div className="card-body p-2 max-h-72 sm:max-h-96 overflow-y-auto">
         <ul className="list gap-2">
           <li className="list-row">
             <h2 className="font-semibold flex items-center text-base sm:text-lg">

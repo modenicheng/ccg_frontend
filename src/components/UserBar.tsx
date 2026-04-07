@@ -43,7 +43,7 @@ export const UserBar: React.FC<UserBarProps> = ({
         })}
       >
         <div className="card-body p-2 w-full overflow-hidden">
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center min-w-0">
             <div
               className={clsx(
                 "badge badge-primary transition-all w-16",
@@ -60,20 +60,25 @@ export const UserBar: React.FC<UserBarProps> = ({
             >
               {order ?? "-"}
             </div>
-            <div
-              className={clsx("font-semibold text-base transition-all ease-out", {
-                "text-primary-content": answering,
-                "text-primary translate-x-0": activate,
-                "text-base-content translate-x-0": hasBuzzed && !activate,
-                "-translate-x-10": !activate && !hasBuzzed,
-                "text-base-content/70": hasBuzzed && !activate && !answering,
-                "text-gray-400": !online,
-              })}
-            >
-              {username}
+            <div className="flex-1 min-w-0">
+              <div
+                className={clsx(
+                  "font-semibold text-base transition-all ease-out truncate",
+                  {
+                    "text-primary-content": answering,
+                    "text-primary translate-x-0": activate,
+                    "text-base-content translate-x-0": hasBuzzed && !activate,
+                    "-translate-x-10": !activate && !hasBuzzed,
+                    "text-base-content/70": hasBuzzed && !activate && !answering,
+                    "text-gray-400": !online,
+                  },
+                )}
+              >
+                {username}
+              </div>
             </div>
             {isSelf || !online || (showKickAction && onKick) || (isSelf && hasBuzzed) ? (
-              <div className="ml-auto flex items-center gap-1">
+              <div className="ml-auto flex shrink-0 items-center justify-end gap-1">
                 {isSelf ? <div className="badge badge-soft badge-info">我</div> : null}
                 {isSelf && hasBuzzed ? <div className="badge badge-soft badge-warning">已抢答</div> : null}
                 {!online ? <div className="badge badge-soft badge-neutral text-xs">离线</div> : null}

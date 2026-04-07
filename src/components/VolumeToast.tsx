@@ -14,7 +14,7 @@ export function VolumeToast({
   if (!isVisible) return null;
 
   return (
-    <div className="toast toast-top toast-start z-50">
+    <div className="toast toast-top toast-start z-120">
       <div
         className={clsx(
           "card bg-base-100 shadow-lg w-64 transition-all duration-200 ease-out",

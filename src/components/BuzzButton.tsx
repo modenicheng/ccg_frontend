@@ -25,7 +25,7 @@ export function BuzzButton({
     <div className="card shadow-sm w-full sm:w-auto">
       <button
         type="button"
-        className={clsx("btn btn-primary w-full sm:w-2xs h-full p-3 sm:p-4 flex-col gap-2 sm:gap-4 min-h-[88px] sm:min-h-auto", {
+        className={clsx("btn btn-primary w-full sm:w-2xs h-full p-3 sm:p-4 flex-col gap-2 sm:gap-4 min-h-22 sm:min-h-auto", {
           "btn-disabled": isDisabled,
           "btn-active": isBuzzHotkeyActive,
         })}

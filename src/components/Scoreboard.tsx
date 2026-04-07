@@ -13,8 +13,8 @@ interface ScoreboardProps {
 
 export function Scoreboard({ scores, userId }: ScoreboardProps) {
   return (
-    <div className="card shadow-sm w-full sm:flex-1 min-h-56">
-      <div className="card-body overflow-auto p-0 max-h-64">
+    <div className="card shadow-sm w-full sm:flex-1 min-h-56 sm:max-h-112">
+      <div className="card-body overflow-y-auto p-0 max-h-72 sm:max-h-96">
         <table className="table table-pin-cols table-pin-rows">
           <thead>
             <tr>
