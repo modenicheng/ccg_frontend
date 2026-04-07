@@ -35,11 +35,11 @@ export function BuzzButton({
         <h2 className="text-xl sm:text-3xl">抢答！</h2>
         {/* 快捷键提示：仅在桌面端显示 */}
         <div className="hidden sm:flex gap-1 sm:gap-2">
-          <div className="kbd kbd-sm font-mono text-xs sm:text-base">
+          <div className="kbd kbd-sm font-mono text-xs text-base-content sm:text-base">
             Space ␣
           </div>
           <div className="divider divider-horizontal m-0"></div>
-          <div className="kbd kbd-sm font-mono text-xs sm:text-base">
+          <div className="kbd kbd-sm font-mono text-xs text-base-content sm:text-base">
             Enter ⏎
           </div>
         </div>

@@ -253,8 +253,8 @@ const RoomManagePage = () => {
     if (roomid) {
       const roomTitle = title || roomState?.title;
       document.title = roomTitle
-        ? `CCG - 管理${roomTitle}|${roomid}`
-        : `CCG - 管理${roomid}`;
+        ? `GUESongS - 管理${roomTitle}|${roomid}`
+        : `GUESongS - 管理${roomid}`;
     }
   }, [roomid, title, roomState?.title]);
 
@@ -1503,7 +1503,7 @@ const RoomManagePage = () => {
       <nav className="navbar bg-base-100 shadow-sm px-4 md:px-6">
         <div className="navbar-start">
           <div className="flex items-center gap-3">
-            <img src="/icon_01.svg" alt="CCG 图标" className="w-8 h-8" />
+            <img src="/icon_01.svg" alt="GUESongS 图标" className="w-8 h-8" />
             <h1 className="text-xl font-bold">猜猜歌 · 房间管理</h1>
           </div>
         </div>

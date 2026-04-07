@@ -92,7 +92,7 @@ const JoinPage = () => {
       <div className="min-h-screen bg-base-200 flex items-center justify-center p-4">
         <div className="card bg-base-100 shadow-xl w-full max-w-md">
           <div className="card-body items-center text-center">
-            <img src="/icon_01.svg" alt="CCG" className="w-24 h-24 mb-4" />
+            <img src="/icon_01.svg" alt="GUESongS" className="w-24 h-24 mb-4" />
             <h1 className="text-4xl font-bold mb-2">来猜！</h1>
             <div className="flex items-center gap-2">
               <span className="loading loading-spinner loading-sm"></span>
@@ -110,7 +110,7 @@ const JoinPage = () => {
       <div className="min-h-screen bg-base-200 flex items-center justify-center p-4">
         <div className="card bg-base-100 shadow-xl w-full max-w-md">
           <div className="card-body items-center text-center">
-            <img src="/icon_01.svg" alt="CCG" className="w-24 h-24 mb-4" />
+            <img src="/icon_01.svg" alt="GUESongS" className="w-24 h-24 mb-4" />
             <h1 className="text-4xl font-bold mb-2">来猜！</h1>
             <div className="alert alert-error w-full mb-4">
               <span>房间 ID 无效</span>
@@ -132,7 +132,7 @@ const JoinPage = () => {
       <div className="card bg-base-100 shadow-xl w-full max-w-md">
         <div className="card-body items-center text-center">
           {/* 图标 */}
-          <img src="/icon_01.svg" alt="CCG" className="w-24 h-24 mb-4" />
+          <img src="/icon_01.svg" alt="GUESongS" className="w-24 h-24 mb-4" />
 
           {/* 标题 */}
           <h1 className="text-4xl font-bold mb-2">来猜！</h1>

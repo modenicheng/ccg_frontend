@@ -60,6 +60,7 @@ import {
 } from "../types/wsMessages";
 import { syncRoomAuthCookie, syncRoomAuthToSession } from "../utils/roomAuth";
 import { readCookie, clearCookie, copyTextToClipboard, parseErrorMessage } from "../utils/common";
+import { buildRoomWsUrl } from "../utils/wsEndpoint";
 
 const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
@@ -100,21 +101,6 @@ const getActiveAnswerQueue = (
     return [];
   }
   return queue.slice(tailIndex + 1);
-};
-
-const buildWsUrl = (roomId: string, token: string | null) => {
-  const encodedRoomId = encodeURIComponent(roomId);
-  // const baseOrigin = development
-  //   ? ((import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
-  //     "http://localhost:8000")
-  //   : window.location.origin;
-
-  // const url = new URL(baseOrigin);
-  // url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  const pathname = `/ws/${encodedRoomId}`;
-  // url.search = token ? `token=${encodeURIComponent(token)}` : "";
-  // return url.toString();
-  return pathname + (token ? `?token=${encodeURIComponent(token)}` : "");
 };
 
 const clearRoomIdentityStorage = (roomId: string) => {
@@ -351,8 +337,8 @@ function RoomPage() {
     if (roomId) {
       const roomTitle = roomState?.title;
       document.title = roomTitle
-        ? `CCG - 房间${roomTitle}|${roomId}`
-        : `CCG - 房间${roomId}`;
+        ? `GUESongS - 房间${roomTitle}|${roomId}`
+        : `GUESongS - 房间${roomId}`;
     }
   }, [roomId, roomState?.title]);
 
@@ -1228,7 +1214,7 @@ function RoomPage() {
       syncRoomAuthCookie(roomId, wsIdentity);
     }
 
-    const wsUrl = buildWsUrl(roomId, wsAuthToken);
+    const wsUrl = buildRoomWsUrl(roomId, wsAuthToken);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);
@@ -2770,7 +2756,7 @@ function RoomPage() {
       return;
     }
 
-    const joinLink = `http://ccg.modenc.top/join/${roomId}`;
+    const joinLink = `${window.location.origin}/join/${roomId}`;
     try {
       await copyTextToClipboard(joinLink);
       pushToast({ message: "已复制快速加入链接", variant: "success" });
@@ -2953,7 +2939,7 @@ function RoomPage() {
           isJudging={isJudging}
           compact={true}
           compactLarge={true}
-          className="flex-1"
+          className="flex-1 basis-0 min-w-0"
           showAlbum={true}
         />
         <OwnerControls

@@ -36,25 +36,12 @@ import {
   getPlayersSimple,
   getTagGroupsSimple,
 } from "../types/wsMessages";
+import { buildSpectatorWsUrl } from "../utils/wsEndpoint";
 
-const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 20;
 const CANVAS_INIT_DELAY_MS = 0;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
-
-const buildWsUrl = (roomId: string) => {
-  const encodedRoomId = encodeURIComponent(roomId);
-  const baseOrigin = development
-    ? ((import.meta.env.VITE_BACKEND_ORIGIN as string | undefined) ??
-      "http://localhost:8000")
-    : window.location.origin;
-
-  const url = new URL(baseOrigin);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = `/ws/${encodedRoomId}/watch`;
-  return url.toString();
-};
 
 const getActiveAnswerQueue = (
   queue: AnswerQueueItem[],
@@ -168,8 +155,8 @@ function SpectatorPage() {
     if (roomId) {
       const roomTitle = roomState?.title;
       document.title = roomTitle
-        ? `CCG - 观战${roomTitle}|${roomId}`
-        : `CCG - 观战${roomId}`;
+        ? `GUESongS - 观战${roomTitle}|${roomId}`
+        : `GUESongS - 观战${roomId}`;
     }
   }, [roomId, roomState?.title]);
 
@@ -410,7 +397,7 @@ function SpectatorPage() {
       return;
     }
 
-    const wsUrl = buildWsUrl(roomId);
+    const wsUrl = buildSpectatorWsUrl(roomId);
 
     wsRef.current = new WS(wsUrl, WS_RETRY);
     setWsClient(wsRef.current);
@@ -1213,7 +1200,7 @@ function SpectatorPage() {
           songInfo={isJudging ? currentSong : null}
           isJudging={isJudging}
           compact={true}
-          className="flex-1"
+          className="flex-1 basis-0 min-w-0"
           showAlbum={true}
         />
         <div className="card shadow-sm max-w-sm min-w-3xs">

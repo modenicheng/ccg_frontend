@@ -20,8 +20,13 @@ export function RoomInfo({
   onCopyRoomId,
   onCopyJoinLink,
 }: RoomInfoProps) {
+  const joinLink =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/join/${roomId}`
+      : `/join/${roomId}`;
+
   return (
-    <div className="card shadow-sm w-full sm:max-w-sm sm:min-w-3xs">
+    <div className="card shadow-sm md:w-1/4 md:min-w-sm sm:w-full">
       <div className="card-body h-full">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold flex items-center min-w-0 flex-1">
@@ -90,7 +95,7 @@ export function RoomInfo({
         {/* 快速加入链接复制按钮 */}
         <div className="flex items-center gap-1.5 text-xs sm:text-sm">
           <span className="truncate">
-            快速加入： <span className="font-mono text-[10px] sm:text-xs">http://ccg.modenc.top/join/{roomId}</span>
+            快速加入： <span className="font-mono text-[10px] sm:text-xs">{joinLink}</span>
           </span>
           <button
             type="button"

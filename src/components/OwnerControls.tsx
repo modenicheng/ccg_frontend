@@ -55,8 +55,8 @@ export function OwnerControls({
   };
 
   return (
-    <div className="card shadow-sm min-w-xs">
-      <div className="card-body p-3 gap-1.5 user-drag-none min-w-xs">
+    <div className="card shadow-sm min-w-3xs max-w-md md:w-1/4 sm:w-1/6">
+      <div className="card-body p-3 gap-1.5 user-drag-none">
         <button
           type="button"
           className={clsx("btn btn-sm btn-soft", {
