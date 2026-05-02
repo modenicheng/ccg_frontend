@@ -113,17 +113,85 @@ pnpm prepare       # Install Husky git hooks
 
 ```
 src/
-├─ App.tsx                 # Root routing (HomePage, RoomPage, RoomManagePage, SpectatorPage)
+├─ App.tsx                 # Root routing (HomePage, RoomPage, RoomManagePage, SpectatorPage, JoinPage)
 ├─ App.css                 # Global Tailwind/daisyUI styles
 ├─ api/                    # REST API clients (axios‑based)
+│  ├─ http.ts              # Axios instance with error interceptor
+│  ├─ room.ts              # Room CRUD + room info
+│  ├─ room_songs.ts        # Room song list management
+│  ├─ song.ts              # Song CRUD + tag history (defines BackendSong/Song)
+│  ├─ songlist.ts          # Songlist CRUD + platform import
+│  └─ tags.ts              # Tag and tag group CRUD
 ├─ audioPlayer/            # Web Audio worklet and player logic
-├─ components/             # Reusable UI components (20+ components)
-├─ hooks/                  # Custom React Hooks (useIsOwner, useWindowFocus)
-├─ pages/                  # Page‑level components
-├─ stores/                 # Zustand state stores (gameStore, persistStore, webSocketStore, errorToastStore)
+│  ├─ index.ts             # Re‑export
+│  └─ player.ts            # audioPlayer class (playback, visualization, preloading)
+├─ components/             # Reusable UI components (25 components)
+│  ├─ AnswerModal.tsx       # Answer dialog (select tags + description)
+│  ├─ BuzzButton.tsx        # Buzz button with keyboard hints
+│  ├─ ConfirmActionDialogs.tsx  # End game / dissolve / clear songs confirmations
+│  ├─ ConfirmAnswerDialog.tsx   # Answer submission confirmation
+│  ├─ ConnectionStatusBar.tsx   # WS status, latency, canvas, settings
+│  ├─ ErrorToastStack.tsx   # Auto‑dismissing toast stack
+│  ├─ ExistingCredentialDialog.tsx  # Existing credential recovery
+│  ├─ JudgingDialog.tsx     # Judging/grading dialog (393 lines)
+│  ├─ OwnerControls.tsx     # Room owner control panel
+│  ├─ PlayerAnswersTable.tsx # Player answers table for current round
+│  ├─ PlayerList.tsx        # Online players with buzz order
+│  ├─ RemovePlayerDialog.tsx # Kick player confirmation
+│  ├─ RoomInfo.tsx          # Room title, ID copy, join link
+│  ├─ RoundSummaryDialog.tsx # Round score summary with countdown
+│  ├─ Scoreboard.tsx        # Score rankings table
+│  ├─ SettingDialog.tsx     # Theme + volume settings
+│  ├─ SongInfoCard.tsx      # Song info display (compact/normal)
+│  ├─ SongManageDialog.tsx  # Song/songlist management dialog
+│  ├─ TagGroupSelector.tsx  # Tag group radio selector
+│  ├─ TagList.tsx           # Tag list with add/remove/toggle
+│  ├─ TagManageDialog.tsx   # Tag/TagGroup management dialog
+│  ├─ TestAudioModal.tsx    # BGM picker modal
+│  ├─ UserBar.tsx           # Player row with status badges
+│  ├─ VolumeToast.tsx       # Volume level toast
+│  └─ index.ts              # Barrel re‑export
+├─ hooks/                  # Custom React Hooks (12 hooks)
+│  ├─ useAudioContextInterceptor.ts  # AudioContext NotAllowedError recovery
+│  ├─ useAutoToast.ts       # Generic auto‑dismiss toast effect
+│  ├─ useIsOwner.ts         # Check if current user is room owner
+│  ├─ useKeyboardShortcuts.ts  # Buzz + volume hotkeys, gesture recovery
+│  ├─ usePlayerManagement.ts # Player list + kick (RoomManagePage)
+│  ├─ useRoomAudio.ts       # Audio lifecycle, canvas, volume, progress drag, playback sync
+│  ├─ useRoomSongsManagement.ts  # Room songs state + handlers (RoomManagePage)
+│  ├─ useSongManagement.ts  # Song/songlist CRUD (RoomManagePage)
+│  ├─ useTagManagement.ts   # Tag/TagGroup CRUD (RoomManagePage)
+│  ├─ useTestAudioManagement.ts  # BGM picker + polling (RoomManagePage)
+│  ├─ useWindowFocus.ts     # Window focus/blur detection
+│  └─ index.ts              # Barrel re‑export
+├─ pages/                  # Page‑level components + shared WS handlers
+│  ├─ HomePage.tsx          # Create / join / watch room tabs
+│  ├─ JoinPage.tsx          # Standalone join page with room info preview
+│  ├─ RoomPage.tsx          # Game room (player view, ~1170 lines)
+│  ├─ RoomManagePage.tsx    # Room management (owner, ~1210 lines)
+│  ├─ roomWsHandlers.ts     # Shared WS event handlers for RoomPage + SpectatorPage (~1330 lines)
+│  └─ SpectatorPage.tsx     # Spectator view (~726 lines, reuses roomWsHandlers)
+├─ stores/                 # Zustand state stores
+│  ├─ errorToastStore.ts    # Toast notifications (error/success/info, max 6)
+│  ├─ gameStore.ts          # Game state (audio, room, scores, tags)
+│  ├─ persistStore.ts       # Persisted state (theme, volume, users) via localStorage
+│  ├─ webSocketStore.ts     # WS connection state, latency, clock offset
+│  └─ index.ts              # Barrel re‑export
 ├─ types/                  # Shared TypeScript definitions
-├─ utils/                  # Utility functions (color, common, roomAuth)
-└─ wsClient/               # WebSocket client and message handlers (binary frames, heartbeat, time sync)
+│  ├─ eventTypes.ts         # WS binary event types + game event IDs
+│  ├─ store.ts              # Zustand store type definitions
+│  ├─ tag.ts                # UI tag component types
+│  └─ wsMessages.ts         # WS message types + utility functions
+├─ utils/                  # Utility functions
+│  ├─ color.ts              # CSS variable reader
+│  ├─ common.ts             # Cookie, clipboard, error parsing
+│  ├─ gameHelpers.ts        # Shared game helpers (answer queue, score delta, rank map)
+│  ├─ roomAuth.ts           # Room auth tokens (cookies, sessionStorage, Zustand)
+│  └─ wsEndpoint.ts         # WebSocket URL builder
+└─ wsClient/               # WebSocket client
+   ├─ index.ts             # WS class with reconnection, JSON/binary dispatch
+   ├─ dataFrames.ts        # Binary frame parsing (Audio, Heartbeat, TimeSync)
+   └─ handlers.ts          # Heartbeat ping/pong + clock offset calculation
 ```
 
 ## Development Notes
@@ -133,6 +201,7 @@ src/
 - **Theme persistence**: The `persistStore` automatically saves theme/volume/users to localStorage.
 - **WebSocket connection**: Player connects to `/ws/:roomid?token=...&user_id=...`; spectator connects to `/ws/:roomid/watch`.
 - **Binary protocols**: WebSocket uses binary frames for audio streaming (AudioFrame, HeartbeatFrame, TimeSyncFrame).
+- **Shared WS handlers**: `pages/roomWsHandlers.ts` contains all 25 game event handlers used by both RoomPage and SpectatorPage. Room‑only features (auth, judging UI, round summary) are optional fields in `RoomWsHandlerContext` with no‑op defaults.
 - **Custom hooks**: Use `useIsOwner` to check room ownership, `useWindowFocus` for visibility detection.
 - **Error toasts**: ErrorToastStore supports error/success/info variants, max 6 toasts displayed.
 

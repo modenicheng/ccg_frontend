@@ -80,7 +80,7 @@ src/
 │  ├─ http.ts              # HTTP 客户端配置与拦截器
 │  ├─ room.ts              # 房间相关 API
 │  ├─ room_songs.ts        # 房间歌曲相关 API
-│  ├─ song.ts              # 歌曲相关 API
+│  ├─ song.ts              # 歌曲相关 API（定义 BackendSong/Song）
 │  ├─ songlist.ts          # 歌单相关 API
 │  └─ tags.ts              # 标签相关 API
 ├─ audioPlayer/            # Web Audio API 音频播放与可视化
@@ -89,9 +89,11 @@ src/
 ├─ components/             # 可复用 UI 组件
 │  ├─ AnswerModal.tsx      # 答题弹窗组件
 │  ├─ BuzzButton.tsx       # 抢答按钮组件
+│  ├─ ConfirmActionDialogs.tsx  # 结束游戏/解散房间/清空歌曲确认对话框
 │  ├─ ConfirmAnswerDialog.tsx  # 确认答题对话框
 │  ├─ ConnectionStatusBar.tsx  # 连接状态条组件
 │  ├─ ErrorToastStack.tsx  # 错误提示组件
+│  ├─ ExistingCredentialDialog.tsx  # 已有凭证恢复对话框
 │  ├─ JudgingDialog.tsx    # 判分对话框组件
 │  ├─ OwnerControls.tsx    # 房主控制组件
 │  ├─ PlayerAnswersTable.tsx  # 玩家答案表格组件
@@ -102,20 +104,34 @@ src/
 │  ├─ Scoreboard.tsx       # 记分板组件
 │  ├─ SettingDialog.tsx    # 设置对话框组件
 │  ├─ SongInfoCard.tsx     # 歌曲信息卡片组件
+│  ├─ SongManageDialog.tsx # 歌曲/歌单管理对话框
 │  ├─ TagGroupSelector.tsx # 标签组选择器组件
 │  ├─ TagList.tsx          # 标签列表组件
+│  ├─ TagManageDialog.tsx  # 标签/标签组管理对话框
+│  ├─ TestAudioModal.tsx   # 预热 BGM 选择弹窗
 │  ├─ UserBar.tsx          # 用户状态栏组件
 │  ├─ VolumeToast.tsx      # 音量提示组件
 │  └─ index.ts             # 组件导出
 ├─ hooks/                  # React Hooks
+│  ├─ useAudioContextInterceptor.ts  # AudioContext 自动播放拦截恢复
+│  ├─ useAutoToast.ts      # 通用自动消失提示 Hook
 │  ├─ useIsOwner.ts        # 判断是否为房主的 Hook
+│  ├─ useKeyboardShortcuts.ts  # 抢答+音量快捷键 Hook
+│  ├─ usePlayerManagement.ts  # 玩家列表+踢人 Hook（房间管理页）
+│  ├─ useRoomAudio.ts      # 音频生命周期、画布、音量、进度条、播放同步 Hook
+│  ├─ useRoomSongsManagement.ts  # 房间歌曲状态+操作 Hook（房间管理页）
+│  ├─ useSongManagement.ts # 歌曲/歌单 CRUD Hook（房间管理页）
+│  ├─ useTagManagement.ts  # 标签/标签组 CRUD Hook（房间管理页）
+│  ├─ useTestAudioManagement.ts  # BGM 选择+轮询 Hook（房间管理页）
 │  ├─ useWindowFocus.ts    # 窗口焦点检测 Hook
 │  └─ index.ts             # Hooks 导出
-├─ pages/                  # 页面级组件
+├─ pages/                  # 页面级组件 + 共享 WS 处理器
 │  ├─ HomePage.tsx         # 首页（创建/加入/观看房间）
-│  ├─ RoomPage.tsx         # 房间页面（游戏主界面）
-│  ├─ RoomManagePage.tsx   # 房间管理页面
-│  └─ SpectatorPage.tsx    # 观战页面
+│  ├─ JoinPage.tsx         # 独立加入页面（带房间信息预览）
+│  ├─ RoomPage.tsx         # 房间页面（游戏主界面，~1170 行）
+│  ├─ RoomManagePage.tsx   # 房间管理页面（~1210 行）
+│  ├─ roomWsHandlers.ts    # 共享 WS 事件处理器（RoomPage + SpectatorPage，~1330 行）
+│  └─ SpectatorPage.tsx    # 观战页面（~726 行，复用 roomWsHandlers）
 ├─ stores/                 # Zustand 状态管理
 │  ├─ errorToastStore.ts   # 错误提示状态（支持 error/success/info）
 │  ├─ gameStore.ts         # 游戏核心状态
@@ -129,12 +145,14 @@ src/
 │  └─ wsMessages.ts        # WebSocket 消息类型
 ├─ utils/                  # 工具函数
 │  ├─ color.ts             # 颜色处理工具
-│  ├─ common.ts            # 通用工具函数
-│  └─ roomAuth.ts          # 房间认证工具
+│  ├─ common.ts            # 通用工具函数（cookie、剪贴板、错误解析）
+│  ├─ gameHelpers.ts       # 游戏共享工具（答题队列、分数差值、排名映射）
+│  ├─ roomAuth.ts          # 房间认证工具
+│  └─ wsEndpoint.ts        # WebSocket URL 构建器
 ├─ wsClient/               # WebSocket 客户端
-│  ├─ index.ts             # WebSocket 客户端导出
+│  ├─ index.ts             # WebSocket 客户端（重连、JSON/二进制分发）
 │  ├─ dataFrames.ts        # 数据帧处理（音频帧、心跳帧、时间同步帧）
-│  └─ handlers.ts          # 消息处理器
+│  └─ handlers.ts          # 消息处理器（心跳 ping/pong + 时钟偏移计算）
 ├─ App.tsx                 # 根路由组件
 ├─ App.css                 # 全局样式（Tailwind/daisyUI）
 ├─ index.css               # 入口样式
@@ -147,6 +165,7 @@ src/
 - `/room/:roomid`：房间页面 - 游戏主界面（玩家视角）
 - `/room/:roomid/manage`：房间管理 - 管理歌曲、标签、房间设置
 - `/room/:roomid/watch`：观战页面 - 仅观看游戏进程
+- `/join/:roomid`：独立加入页面 - 带房间信息预览
 
 ## REST 接口说明
 
@@ -268,6 +287,10 @@ Vite 开发服务器已配置代理：
 
 玩家 WebSocket 鉴权使用 URL query 参数：`token` 与 `user_id`，不依赖 cookie 握手。
 
+### 共享 WS 事件处理器
+
+`pages/roomWsHandlers.ts` 包含所有 25 个游戏事件处理器，同时被 `RoomPage` 和 `SpectatorPage` 复用。通过 `RoomWsHandlerContext` 接口传入依赖，房页专用功能（鉴权、判分 UI、回合总结）为可选字段，观战页传入空操作默认值即可。
+
 ### 错误处理
 
 API 错误通过 Axios 拦截器统一处理，组件中通过 `errorToastStore` 显示错误提示。
@@ -279,6 +302,15 @@ API 错误通过 Axios 拦截器统一处理，组件中通过 `errorToastStore`
 
 - `useIsOwner`：判断当前用户是否为房主
 - `useWindowFocus`：检测窗口是否处于聚焦状态
+- `useRoomAudio`：音频生命周期管理（播放器初始化、画布、音量、进度条拖拽、播放同步）
+- `useKeyboardShortcuts`：抢答快捷键（Space/Enter）+ 音量快捷键（+/-）+ 手势恢复
+- `useAutoToast`：通用自动消失提示效果
+- `useAudioContextInterceptor`：AudioContext 自动播放拦截恢复
+- `useTagManagement`：标签/标签组 CRUD 状态与操作（房间管理页）
+- `useSongManagement`：歌曲/歌单 CRUD 状态与操作（房间管理页）
+- `useRoomSongsManagement`：房间歌曲状态与操作（房间管理页）
+- `useTestAudioManagement`：预热 BGM 选择与轮询（房间管理页）
+- `usePlayerManagement`：玩家列表与踢人操作（房间管理页）
 
 所有 Hooks 通过 `src/hooks/index.ts` 统一导出。
 
