@@ -53,21 +53,8 @@ import {
 import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { getRoomAuthQueryParams } from "../utils/roomAuth";
-
-const readCookie = (name: string): string | null => {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const matched = document.cookie.match(
-    new RegExp(`(?:^|; )${escaped}=([^;]*)`),
-  );
-  if (!matched) {
-    return null;
-  }
-  try {
-    return decodeURIComponent(matched[1]);
-  } catch {
-    return matched[1];
-  }
-};
+import { readCookie } from "../utils/common";
+import { useAutoToast } from "../hooks/useAutoToast";
 
 function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
   const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
@@ -554,75 +541,21 @@ const RoomManagePage = () => {
     };
   }, [roomSongsError, roomSongsSuccess]);
 
-  useEffect(() => {
-    if (!manageError) {
-      return;
-    }
-    pushToast({ message: manageError, variant: "error" });
-  }, [manageError, pushToast]);
-
-  useEffect(() => {
-    if (!manageSuccess) {
-      return;
-    }
-    pushToast({ message: manageSuccess, variant: "success" });
-  }, [manageSuccess, pushToast]);
-
-  useEffect(() => {
-    if (!error) {
-      return;
-    }
-    pushToast({ message: error, variant: "error" });
-  }, [error, pushToast]);
-
-  useEffect(() => {
-    if (!success) {
-      return;
-    }
-    pushToast({ message: success, variant: "success" });
-  }, [success, pushToast]);
-
-  useEffect(() => {
-    if (!roomSongsError) {
-      return;
-    }
-    pushToast({ message: roomSongsError, variant: "error" });
-  }, [roomSongsError, pushToast]);
-
-  useEffect(() => {
-    if (!roomSongsSuccess) {
-      return;
-    }
-    pushToast({ message: roomSongsSuccess, variant: "success" });
-  }, [roomSongsSuccess, pushToast]);
-
-  useEffect(() => {
-    if (!kickError) {
-      return;
-    }
-    pushToast({ message: kickError, variant: "error" });
-  }, [kickError, pushToast]);
-
-  useEffect(() => {
-    if (!kickSuccess) {
-      return;
-    }
-    pushToast({ message: kickSuccess, variant: "success" });
-  }, [kickSuccess, pushToast]);
-
-  useEffect(() => {
-    if (!songManageError) {
-      return;
-    }
-    pushToast({ message: songManageError, variant: "error" });
-  }, [songManageError, pushToast]);
-
-  useEffect(() => {
-    if (!songManageSuccess) {
-      return;
-    }
-    pushToast({ message: songManageSuccess, variant: "success" });
-  }, [songManageSuccess, pushToast]);
+  useAutoToast(
+    [
+      { message: manageError, variant: "error" },
+      { message: manageSuccess, variant: "success" },
+      { message: error, variant: "error" },
+      { message: success, variant: "success" },
+      { message: roomSongsError, variant: "error" },
+      { message: roomSongsSuccess, variant: "success" },
+      { message: kickError, variant: "error" },
+      { message: kickSuccess, variant: "success" },
+      { message: songManageError, variant: "error" },
+      { message: songManageSuccess, variant: "success" },
+    ],
+    pushToast,
+  );
 
   const hasChanges = useMemo(() => {
     const titleChanged = title.trim() !== initialTitle.trim();

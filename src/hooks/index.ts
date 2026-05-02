@@ -2,3 +2,4 @@ export { useIsOwner } from "./useIsOwner";
 export { useWindowFocus } from "./useWindowFocus";
 export { useAudioContextInterceptor } from "./useAudioContextInterceptor";
 export { useKeyboardShortcuts } from "./useKeyboardShortcuts";
+export { useAutoToast } from "./useAutoToast";
