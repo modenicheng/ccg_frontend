@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import type { audioPlayer } from '../audioPlayer';
 
 export function useAudioContextInterceptor() {
   const [showAudioPrompt, setShowAudioPrompt] = useState(false);
@@ -23,7 +24,7 @@ export function useAudioContextInterceptor() {
   }, []);
 
   // 处理用户点击弹窗，恢复 AudioContext
-  const handleAudioPromptClick = useCallback(async (audioPlayer: any) => {
+  const handleAudioPromptClick = useCallback(async (audioPlayer: audioPlayer | null) => {
     try {
       await audioPlayer?.ensureRunning?.();
       setShowAudioPrompt(false);
@@ -47,7 +48,7 @@ export function useAudioContextInterceptor() {
   }, []);
 
   // 创建错误处理回调，绑定到 audioPlayer
-  const createPlaybackErrorCallback = useCallback((_audioPlayer: any) => {
+  const createPlaybackErrorCallback = useCallback(() => {
     return (error: Error) => {
       if (error.name === 'NotAllowedError') {
         console.warn('[AUDIO_INTERCEPTOR] Detected NotAllowedError, showing prompt');
@@ -58,9 +59,9 @@ export function useAudioContextInterceptor() {
   }, [showAudioContextPrompt]);
 
   // 初始化音频播放器的错误回调
-  const setupAudioPlayerInterceptor = useCallback((audioPlayer: any) => {
+  const setupAudioPlayerInterceptor = useCallback((audioPlayer: audioPlayer | null) => {
     if (audioPlayer && typeof audioPlayer.setPlaybackErrorCallback === 'function') {
-      audioPlayer.setPlaybackErrorCallback(createPlaybackErrorCallback(audioPlayer));
+      audioPlayer.setPlaybackErrorCallback(createPlaybackErrorCallback());
     }
   }, [createPlaybackErrorCallback]);
 

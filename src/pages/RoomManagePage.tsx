@@ -408,7 +408,7 @@ const RoomManagePage = () => {
     return () => {
       isMounted = false;
     };
-  }, [currentUserId, loadRoomSongs, loadTagGroups, navigate, roomSongSearchKw, roomid]);
+  }, [currentUserId, loadRoomSongs, loadTagGroups, navigate, roomSongSearchKw, roomid, setPlayers, setRoomSongsPage]);
 
   useEffect(() => {
     return () => {
@@ -418,7 +418,7 @@ const RoomManagePage = () => {
       }
       testAudioRequestVersionRef.current += 1;
     };
-  }, []);
+  }, [pollingRef, testAudioRequestVersionRef]);
 
   useAutoToast(
     [
