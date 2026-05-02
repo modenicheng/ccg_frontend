@@ -3,3 +3,7 @@ export { useWindowFocus } from "./useWindowFocus";
 export { useAudioContextInterceptor } from "./useAudioContextInterceptor";
 export { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 export { useAutoToast } from "./useAutoToast";
+export { useTagManagement } from "./useTagManagement";
+export { useSongManagement } from "./useSongManagement";
+export { useRoomSongsManagement } from "./useRoomSongsManagement";
+export { useTestAudioManagement } from "./useTestAudioManagement";

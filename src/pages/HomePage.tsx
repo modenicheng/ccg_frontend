@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { createRoom, joinRoom } from "../api/room";
 import usePersistStore from "../stores/persistStore";
 import useErrorToastStore from "../stores/errorToastStore";
-import { syncRoomAuthToSession } from "../utils/roomAuth";
+import { syncRoomAuthToSession, clearRoomAuthForRoom } from "../utils/roomAuth";
+import { ExistingCredentialDialog } from "../components/ExistingCredentialDialog";
 
 type HomeTab = "create" | "join" | "watch";
 
@@ -21,6 +22,59 @@ function HomePage() {
 
   const persistStore = usePersistStore();
   const pushToast = useErrorToastStore((state) => state.pushToast);
+
+  const credDialogRef = useRef<HTMLDialogElement>(null);
+  const existingUserRef = useRef<{
+    id: number;
+    roomId: string;
+    username: string;
+    token: string;
+  } | null>(null);
+  const [existingUser, setExistingUser] = useState<{
+    id: number;
+    roomId: string;
+    username: string;
+    token: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const trimmed = roomIdInput.trim();
+    if (!trimmed) {
+      existingUserRef.current = null;
+      setExistingUser(null);
+      return;
+    }
+    const existing = persistStore.getRoomUser(trimmed);
+    if (existing) {
+      existingUserRef.current = existing;
+      setExistingUser(existing);
+    } else {
+      existingUserRef.current = null;
+      setExistingUser(null);
+    }
+  }, [roomIdInput, persistStore]);
+
+  useEffect(() => {
+    if (existingUser) {
+      credDialogRef.current?.showModal();
+    } else {
+      credDialogRef.current?.close();
+    }
+  }, [existingUser]);
+
+  const handleGoToRoom = () => {
+    if (!existingUserRef.current) return;
+    credDialogRef.current?.close();
+    navigate(`/room/${existingUserRef.current.roomId}`);
+  };
+
+  const handleClearAndContinue = () => {
+    if (!existingUserRef.current) return;
+    clearRoomAuthForRoom(existingUserRef.current.roomId);
+    existingUserRef.current = null;
+    setExistingUser(null);
+    credDialogRef.current?.close();
+  };
 
   useEffect(() => {
     document.title = "GUESongS - 主页";
@@ -236,6 +290,16 @@ function HomePage() {
 
         </div>
       </div>
+
+      {existingUser && (
+        <ExistingCredentialDialog
+          dialogRef={credDialogRef}
+          username={existingUser.username}
+          roomId={existingUser.roomId}
+          onGoToRoom={handleGoToRoom}
+          onClearAndContinue={handleClearAndContinue}
+        />
+      )}
     </div>
   );
 }

@@ -28,7 +28,7 @@ export function useAudioContextInterceptor() {
       await audioPlayer?.ensureRunning?.();
       setShowAudioPrompt(false);
       hasShownPromptRef.current = false; // 重置，允许下次再显示
-      
+
       // 如果有待处理的错误，尝试重新播放
       if (pendingErrorRef.current) {
         console.log("[AUDIO_PROMPT] Retrying playback after user gesture");

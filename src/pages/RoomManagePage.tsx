@@ -8,53 +8,24 @@ import useWebSocketStore from "../stores/webSocketStore";
 import {
   getRoomInfo,
   patchRoomInfo,
-  setRoomTestAudio,
   type RoomInfoResponse,
 } from "../api/room";
 import {
-  createTagGroup,
-  createTags,
-  deleteTag,
-  deleteTagGroup,
   getTagGroups,
-  getTags,
-  patchTagGroup,
-  updateTag,
-  type Tag,
   type TagGroup,
 } from "../api/tags";
 import { GameEventId } from "../types/eventTypes";
-import type { TagItem } from "../types/tag";
-import {
-  getSongs,
-  createSong,
-  updateSong,
-  deleteSong,
-  type Song,
-  type CreateSongRequest,
-} from "../api/song";
-import {
-  getSonglists,
-  getSonglistDetail,
-  createSonglistFromPlatform,
-  deleteSonglist,
-  getSonglistTaskResult,
-  type Songlist,
-  type CreateSonglistFromPlatformRequest,
-} from "../api/songlist";
-import {
-  getRoomSongs,
-  addSongsToRoom,
-  removeSongsFromRoom,
-  clearRoomSongs,
-  shuffleRoomSongs,
-  type RoomSong,
-} from "../api/room_songs";
+
 import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { getRoomAuthQueryParams } from "../utils/roomAuth";
 import { readCookie } from "../utils/common";
 import { useAutoToast } from "../hooks/useAutoToast";
+import { usePlayerManagement } from "../hooks/usePlayerManagement";
+import { useSongManagement } from "../hooks/useSongManagement";
+import { useTagManagement } from "../hooks/useTagManagement";
+import { useTestAudioManagement } from "../hooks/useTestAudioManagement";
+import { useRoomSongsManagement } from "../hooks/useRoomSongsManagement";
 
 function mapRoomInfoToRoomState(data: RoomInfoResponse): RoomState {
   const statusCode = data.status === "playing" ? 1 : data.status === "ended" ? 2 : 0;
@@ -128,138 +99,17 @@ const RoomManagePage = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const manageDialogRef = useRef<HTMLDialogElement | null>(null);
-  const editGroupDialogRef = useRef<HTMLDialogElement | null>(null);
-  const editTagDialogRef = useRef<HTMLDialogElement | null>(null);
-  const newTagInputRef = useRef<HTMLInputElement | null>(null);
-  const deleteTagConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
-  const deleteConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
-  const deleteSongConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
-  const deleteSonglistConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
-  const clearRoomSongsConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const endGameConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
   const dissolveRoomConfirmDialogRef = useRef<HTMLDialogElement | null>(null);
-  const [manageTags, setManageTags] = useState<Tag[]>([]);
-  const [manageTagGroups, setManageTagGroups] = useState<TagGroup[]>([]);
-  const [groupTagIds, setGroupTagIds] = useState<number[]>([]);
-  const [newTagName, setNewTagName] = useState("");
-  const [newGroupName, setNewGroupName] = useState("");
-  const [newGroupDescription, setNewGroupDescription] = useState("");
-  const [isManageLoading, setIsManageLoading] = useState(false);
-  const [isCreatingTag, setIsCreatingTag] = useState(false);
-  const [isUpdatingTag, setIsUpdatingTag] = useState(false);
-  const [deletingTagId, setDeletingTagId] = useState<number | null>(null);
-  const [isCreatingGroup, setIsCreatingGroup] = useState(false);
-  const [isEditingGroup, setIsEditingGroup] = useState(false);
-  const [deletingGroupId, setDeletingGroupId] = useState<number | null>(null);
-  const [pendingDeleteGroup, setPendingDeleteGroup] = useState<TagGroup | null>(
-    null,
-  );
-  const [manageError, setManageError] = useState<string | null>(null);
-  const [manageSuccess, setManageSuccess] = useState<string | null>(null);
 
-  const [editingTagId, setEditingTagId] = useState<number | null>(null);
-  const [editingTagName, setEditingTagName] = useState("");
-  const [pendingDeleteTag, setPendingDeleteTag] = useState<Tag | null>(null);
-
-  const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
-  const [editingGroupName, setEditingGroupName] = useState("");
-  const [editingGroupDescription, setEditingGroupDescription] = useState("");
-  const [editingTagIds, setEditingTagIds] = useState<number[]>([]);
-  const [initialEditingTagIds, setInitialEditingTagIds] = useState<number[]>(
-    [],
-  );
-  const [initialEditingGroupName, setInitialEditingGroupName] = useState("");
-  const [initialEditingGroupDescription, setInitialEditingGroupDescription] =
-    useState("");
-
-  // 歌曲管理状态
-  const songManageDialogRef = useRef<HTMLDialogElement | null>(null);
-  const [songManageTab, setSongManageTab] = useState<"songs" | "songlists">(
-    "songs",
-  );
-  const [songs, setSongs] = useState<Song[]>([]);
-  const [songlists, setSonglists] = useState<Songlist[]>([]);
-  const [songPage, setSongPage] = useState(1);
-  const [songTotal, setSongTotal] = useState(0);
-  const [songlistPage, setSonglistPage] = useState(1);
-  const [songlistTotal, setSonglistTotal] = useState(0);
-  const songPageSize = 10;
-  const songlistPageSize = 10;
-  const [songSearchKw, setSongSearchKw] = useState("");
-  const [songlistSearchKw, setSonglistSearchKw] = useState("");
-  const [roomSongSearchKw, setRoomSongSearchKw] = useState("");
-  const [isSongManageLoading, setIsSongManageLoading] = useState(false);
-  const [songManageError, setSongManageError] = useState<string | null>(null);
-  const [songManageSuccess, setSongManageSuccess] = useState<string | null>(
-    null,
-  );
-  // 歌曲表单
-  const [newSong, setNewSong] = useState<CreateSongRequest>({});
-  const [editingSongId, setEditingSongId] = useState<number | null>(null);
-  const [editingSongData, setEditingSongData] = useState<CreateSongRequest>({});
-  const [isCreatingSong, setIsCreatingSong] = useState(false);
-  const [isUpdatingSong, setIsUpdatingSong] = useState(false);
-  const [pendingDeleteSongId, setPendingDeleteSongId] = useState<number | null>(
-    null,
-  );
-  const [confirmDeleteSongId, setConfirmDeleteSongId] = useState<number | null>(
-    null,
-  );
-  // 歌单表单
-  const [newSonglistPlatform, setNewSonglistPlatform] = useState("qq");
-  const [newSonglistPlatformId, setNewSonglistPlatformId] = useState("");
-  const [newSonglistCookie, setNewSonglistCookie] = useState("");
-  const [isCreatingSonglist, setIsCreatingSonglist] = useState(false);
-  const [isPollingTask, setIsPollingTask] = useState(false);
-  const pollingRef = useRef<number | null>(null);
-  const testAudioRequestVersionRef = useRef(0);
-  const [pendingDeleteSonglistId, setPendingDeleteSonglistId] = useState<
-    number | null
-  >(null);
-  const [confirmDeleteSonglistId, setConfirmDeleteSonglistId] = useState<
-    number | null
-  >(null);
-  // 绑定歌单到房间
-  const [bindSonglistId, setBindSonglistId] = useState<number | null>(null);
-  const [isBindingSonglist, setIsBindingSonglist] = useState(false);
-  // 添加单曲到房间
-  const [addSingleSongId, setAddSingleSongId] = useState<number | null>(null);
-  const [isAddingSingleSong, setIsAddingSingleSong] = useState(false);
-  // 设置预热 BGM - 统一使用数据库 song_id
-  const [testAudioSongId, setTestAudioSongId] = useState<number | null>(null); // 数据库歌曲 ID
-  const [initialTestAudioSongId, setInitialTestAudioSongId] = useState<number | null>(null); // 保存按钮变更判断
-  const [isSettingTestAudio, setIsSettingTestAudio] = useState(false);
-  const [testAudioSearchKw, setTestAudioSearchKw] = useState<string>("");
-  const [testAudioSongs, setTestAudioSongs] = useState<Song[]>([]); // 所有数据库歌曲
-  const [testAudioSongsTotal, setTestAudioSongsTotal] = useState(0);
-  const [testAudioSongsPage, setTestAudioSongsPage] = useState(1);
-  const [isLoadingTestAudioSongs, setIsLoadingTestAudioSongs] = useState(false);
-  const [isSwitchingTestAudio, setIsSwitchingTestAudio] = useState(false);
-  const [testAudioTaskId, setTestAudioTaskId] = useState<string | null>(null);
-  const [testAudioTaskStatus, setTestAudioTaskStatus] = useState<string | null>(
-    null,
-  );
-  const [testAudioTargetSongId, setTestAudioTargetSongId] = useState<
-    number | null
-  >(null);
-
-  // 房间歌曲状态
-  const [roomSongs, setRoomSongs] = useState<RoomSong[]>([]);
-  const [roomSongsPage, setRoomSongsPage] = useState(1);
-  const [roomSongsTotal, setRoomSongsTotal] = useState(0);
-  const [isLoadingRoomSongs, setIsLoadingRoomSongs] = useState(false);
-  const [roomSongsError, setRoomSongsError] = useState<string | null>(null);
-  const [roomSongsSuccess, setRoomSongsSuccess] = useState<string | null>(null);
-  const [selectedRoomSongIds, setSelectedRoomSongIds] = useState<number[]>([]);
-  const [isShufflingRoomSongs, setIsShufflingRoomSongs] = useState(false);
-  const roomSongsPageSize = 10;
-
-  // 玩家管理状态
-  const [players, setPlayers] = useState<Array<{ id: number; username: string; is_owner: boolean }>>([]);
-  const [isKicking, setIsKicking] = useState<number | null>(null);
-  const [kickError, setKickError] = useState<string | null>(null);
-  const [kickSuccess, setKickSuccess] = useState<string | null>(null);
+  const {
+    setPlayers,
+    isKicking,
+    kickError,
+    kickSuccess,
+    uniquePlayers,
+    handleKickUser,
+  } = usePlayerManagement({ roomid: roomId, wsClient });
 
   useEffect(() => {
     if (roomid) {
@@ -281,145 +131,198 @@ const RoomManagePage = () => {
     return allGroups;
   }, []);
 
-  const loadSongs = useCallback(
-    async (page = songPage, kw?: string) => {
-      try {
-        const { list, total } = await getSongs({
-          offset: (page - 1) * songPageSize,
-          limit: songPageSize,
-          kw: kw || undefined,
-        });
-        setSongs(list);
-        setSongTotal(total);
-      } catch (err) {
-        setSongManageError((err as Error).message || "加载歌曲列表失败");
-      }
-    },
-    [songPage],
-  );
+  const {
+    manageTags,
+    manageTagGroups,
+    setGroupTagIds,
+    newTagName,
+    setNewTagName,
+    newGroupName,
+    setNewGroupName,
+    newGroupDescription,
+    setNewGroupDescription,
+    isManageLoading,
+    isCreatingTag,
+    isUpdatingTag,
+    deletingTagId,
+    isCreatingGroup,
+    isEditingGroup,
+    deletingGroupId,
+    pendingDeleteGroup,
+    setPendingDeleteGroup,
+    manageError,
+    manageSuccess,
+    editingTagName,
+    setEditingTagName,
+    pendingDeleteTag,
+    setPendingDeleteTag,
+    editingGroupName,
+    setEditingGroupName,
+    editingGroupDescription,
+    setEditingGroupDescription,
+    setEditingTagIds,
+    manageDialogRef,
+    editGroupDialogRef,
+    editTagDialogRef,
+    newTagInputRef,
+    deleteTagConfirmDialogRef,
+    deleteConfirmDialogRef,
+    handleOpenManageDialog,
+    handleCreateTag,
+    handleStartEditTag,
+    handleCancelEditTag,
+    handleSaveEditTag,
+    handleDeleteTag,
+    handleConfirmDeleteTag,
+    handleDeleteTagDialogKeyDown,
+    handleNewTagKeyDown,
+    handleCreateTagGroup,
+    handleStartEditGroup,
+    handleCancelEditGroup,
+    handleSaveEditGroup,
+    handleDeleteGroup,
+    handleConfirmDeleteGroup,
+    handleDeleteDialogKeyDown,
+    selectableTagItems,
+    selectableEditTagItems,
+  } = useTagManagement({
+    loadTagGroups,
+    onTagGroupsLoaded: setTagGroups,
+  });
 
-  const loadTestAudioSongs = useCallback(
-    async (page: number, kw?: string) => {
-      setIsLoadingTestAudioSongs(true);
-      try {
-        const { list, total } = await getSongs({
-          offset: (page - 1) * roomSongsPageSize,
-          limit: roomSongsPageSize,
-          kw: kw || undefined,
-        });
-        setTestAudioSongs(list);
-        setTestAudioSongsTotal(total);
-      } catch (err) {
-        setSongManageError((err as Error).message || "加载歌曲列表失败");
-      } finally {
-        setIsLoadingTestAudioSongs(false);
-      }
-    },
-    [],
-  );
+  const {
+    roomSongs,
+    roomSongsPage,
+    setRoomSongsPage,
+    roomSongsTotal,
+    isLoadingRoomSongs,
+    roomSongsError,
+    roomSongsSuccess,
+    selectedRoomSongIds,
+    isShufflingRoomSongs,
+    roomSongSearchKw,
+    setRoomSongSearchKw,
+    clearRoomSongsConfirmDialogRef,
+    loadRoomSongs,
+    roomSongsHasPrev,
+    roomSongsTotalPages,
+    roomSongsHasNext,
+    handleRoomSongsPageChange,
+    handleRemoveSongsFromRoom,
+    handleOpenClearRoomSongsConfirm,
+    handleClearRoomSongs,
+    handleShuffleRoomSongs,
+    toggleRoomSongSelection,
+    handleSelectAllRoomSongs,
+  } = useRoomSongsManagement({ roomid: roomId });
 
-  const loadRoomSongs = useCallback(
-    async (page: number, kw?: string) => {
-      if (!roomid) return;
-      setIsLoadingRoomSongs(true);
-      setRoomSongsError(null);
-      try {
-        const data = await getRoomSongs(roomid, {
-          offset: (page - 1) * roomSongsPageSize,
-          limit: roomSongsPageSize,
-          kw: kw || undefined,
-        });
-        setRoomSongs(data.list);
-        setRoomSongsTotal(data.total);
-        setSelectedRoomSongIds((prev) =>
-          prev.filter((id) => data.list.some((song) => song.song_id === id)),
-        );
-        return data;
-      } catch (err) {
-        setRoomSongsError((err as Error).message || "加载房间歌曲失败");
-      } finally {
-        setIsLoadingRoomSongs(false);
-      }
-    },
-    [roomid],
-  );
+  const {
+    songManageDialogRef,
+    deleteSongConfirmDialogRef,
+    deleteSonglistConfirmDialogRef,
+    pollingRef,
+    songManageTab,
+    setSongManageTab,
+    isSongManageLoading,
+    songManageError,
+    setSongManageError,
+    songManageSuccess,
+    setSongManageSuccess,
+    songs,
+    songPage,
+    setSongPage,
+    songSearchKw,
+    setSongSearchKw,
+    songHasPrev,
+    songTotalPages,
+    songHasNext,
+    songlists,
+    songlistPage,
+    setSonglistPage,
+    songlistSearchKw,
+    setSonglistSearchKw,
+    songlistHasPrev,
+    songlistTotalPages,
+    songlistHasNext,
+    newSong,
+    setNewSong,
+    editingSongId,
+    editingSongData,
+    setEditingSongData,
+    isCreatingSong,
+    isUpdatingSong,
+    pendingDeleteSongId,
+    confirmDeleteSongId,
+    setConfirmDeleteSongId,
+    newSonglistPlatform,
+    setNewSonglistPlatform,
+    newSonglistPlatformId,
+    setNewSonglistPlatformId,
+    newSonglistCookie,
+    setNewSonglistCookie,
+    isCreatingSonglist,
+    isPollingTask,
+    pendingDeleteSonglistId,
+    confirmDeleteSonglistId,
+    setConfirmDeleteSonglistId,
+    bindSonglistId,
+    setBindSonglistId,
+    isBindingSonglist,
+    addSingleSongId,
+    setAddSingleSongId,
+    isAddingSingleSong,
+    loadSongs,
+    loadSonglists,
+    handleSongPageChange,
+    handleSonglistPageChange,
+    handleOpenSongManageDialog,
+    handleCreateSong,
+    handleStartEditSong,
+    handleCancelEditSong,
+    handleSaveEditSong,
+    handleDeleteSong,
+    handleConfirmDeleteSong,
+    handleCreateSonglist,
+    handleDeleteSonglist,
+    handleConfirmDeleteSonglist,
+    handleAddSingleSongToRoom,
+    handleBindSonglistToRoom,
+  } = useSongManagement({
+    roomid: roomId,
+    loadRoomSongs,
+    roomSongSearchKw,
+    setRoomSongsPage,
+  });
 
-  const loadSonglists = useCallback(
-    async (page = songlistPage, kw?: string) => {
-      try {
-        const offset = (page - 1) * songlistPageSize;
-        const { list, total } = await getSonglists({
-          offset,
-          limit: songlistPageSize,
-          kw: kw || undefined,
-        });
-        setSonglists(list);
-        setSonglistTotal(total);
-      } catch (err) {
-        setSongManageError((err as Error).message || "加载歌单列表失败");
-      }
-    },
-    [songlistPage],
-  );
-
-  const songHasPrev = songPage > 1;
-  const songTotalPages = Math.max(1, Math.ceil(songTotal / songPageSize));
-  const songHasNext = songPage < songTotalPages;
-  const songlistHasPrev = songlistPage > 1;
-  const songlistTotalPages = Math.max(
-    1,
-    Math.ceil(songlistTotal / songlistPageSize),
-  );
-  const songlistHasNext = songlistPage < songlistTotalPages;
-  const roomSongsHasPrev = roomSongsPage > 1;
-  const roomSongsTotalPages = Math.max(
-    1,
-    Math.ceil(roomSongsTotal / roomSongsPageSize),
-  );
-  const roomSongsHasNext = roomSongsPage < roomSongsTotalPages;
-
-  const handleSongPageChange = async (nextPage: number) => {
-    if (nextPage < 1 || nextPage === songPage) return;
-    setSongPage(nextPage);
-    await loadSongs(nextPage, songSearchKw);
-  };
-
-  const handleSonglistPageChange = async (nextPage: number) => {
-    if (nextPage < 1 || nextPage === songlistPage) return;
-    setSonglistPage(nextPage);
-    await loadSonglists(nextPage, songlistSearchKw);
-  };
-
-  const handleRoomSongsPageChange = async (nextPage: number) => {
-    if (nextPage < 1 || nextPage === roomSongsPage) return;
-    setRoomSongsPage(nextPage);
-    await loadRoomSongs(nextPage, roomSongSearchKw);
-  };
-
-  const loadManageData = useCallback(async () => {
-    setIsManageLoading(true);
-    setManageError(null);
-    try {
-      const [allTags, allGroups] = await Promise.all([
-        getTags(),
-        getTagGroups(),
-      ]);
-      setManageTags(allTags);
-      setManageTagGroups(allGroups);
-      setTagGroups(allGroups);
-
-      const validTagIds = new Set(allTags.map((tag) => tag.id));
-      setGroupTagIds((prev) => prev.filter((id) => validTagIds.has(id)));
-      setEditingTagIds((prev) => prev.filter((id) => validTagIds.has(id)));
-      setInitialEditingTagIds((prev) =>
-        prev.filter((id) => validTagIds.has(id)),
-      );
-    } catch (err) {
-      setManageError((err as Error).message || "加载 Tag 管理数据失败");
-    } finally {
-      setIsManageLoading(false);
-    }
-  }, []);
+  const {
+    testAudioSongId,
+    initialTestAudioSongId,
+    isSettingTestAudio,
+    setIsSettingTestAudio,
+    testAudioSearchKw,
+    setTestAudioSearchKw,
+    testAudioSongs,
+    testAudioSongsTotal,
+    testAudioSongsPage,
+    setTestAudioSongsPage,
+    isLoadingTestAudioSongs,
+    isSwitchingTestAudio,
+    testAudioTaskId,
+    testAudioTaskStatus,
+    testAudioTargetSongId,
+    testAudioRequestVersionRef,
+    isUiBlockedByTestAudioTask,
+    loadTestAudioSongs,
+    applyTestAudioWithPolling,
+    handleOpenTestAudioDialog,
+    handleTestAudioSongsPageChange,
+    handleSetTestAudio,
+    roomSongsPageSize,
+  } = useTestAudioManagement({
+    roomid: roomId,
+    setError: setSongManageError,
+    setSuccess: setSongManageSuccess,
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -511,36 +414,6 @@ const RoomManagePage = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (!manageError && !manageSuccess) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setManageError(null);
-      setManageSuccess(null);
-    }, 5_000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [manageError, manageSuccess]);
-
-  useEffect(() => {
-    if (!roomSongsError && !roomSongsSuccess) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setRoomSongsError(null);
-      setRoomSongsSuccess(null);
-    }, 5_000);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [roomSongsError, roomSongsSuccess]);
-
   useAutoToast(
     [
       { message: manageError, variant: "error" },
@@ -566,433 +439,10 @@ const RoomManagePage = () => {
     return titleChanged || selectedChanged || testAudioChanged;
   }, [initialSelectedIds, initialTestAudioSongId, initialTitle, selectedTagGroupIds, testAudioSongId, title]);
 
-  const isUiBlockedByTestAudioTask = isSwitchingTestAudio;
-
-  const applyTestAudioWithPolling = useCallback(
-    async (
-      songDbId: number,
-      options: { closeDialogOnSuccess: boolean } = { closeDialogOnSuccess: true },
-    ) => {
-      if (!roomid || isSwitchingTestAudio) {
-        return false;
-      }
-
-      const requestVersion = testAudioRequestVersionRef.current + 1;
-      testAudioRequestVersionRef.current = requestVersion;
-
-      setIsSwitchingTestAudio(true);
-      setTestAudioTargetSongId(songDbId);
-      setTestAudioTaskId(null);
-      setTestAudioTaskStatus(null);
-      setSongManageError(null);
-
-      let hasShownTaskHint = false;
-
-      try {
-        for (let attempt = 0; attempt < 120; attempt += 1) {
-          const response = await setRoomTestAudio(roomid, songDbId);
-
-          if (testAudioRequestVersionRef.current !== requestVersion) {
-            return false;
-          }
-
-          if (response.status === "task") {
-            setTestAudioTaskId(response.taskId);
-            setTestAudioTaskStatus(response.taskStatus);
-            if (!hasShownTaskHint) {
-              setSongManageSuccess("服务器正在拉取音频文件，请稍候...");
-              hasShownTaskHint = true;
-            }
-            await new Promise<void>((resolve) => {
-              window.setTimeout(resolve, 1500);
-            });
-            continue;
-          }
-
-          setTestAudioSongId(songDbId);
-          setInitialTestAudioSongId(songDbId);
-          setTestAudioTaskId(null);
-          setTestAudioTaskStatus(null);
-          setSongManageSuccess(
-            `已设置预热 BGM：${response.title || "歌曲"} (ID: ${songDbId})`,
-          );
-
-          if (options.closeDialogOnSuccess) {
-            setIsSettingTestAudio(false);
-          }
-
-          return true;
-        }
-
-        setSongManageError("等待音频拉取超时，请稍后重试");
-        return false;
-      } catch (error) {
-        setSongManageError((error as Error).message || "设置预热 BGM 失败");
-        return false;
-      } finally {
-        if (testAudioRequestVersionRef.current === requestVersion) {
-          setIsSwitchingTestAudio(false);
-          setTestAudioTargetSongId(null);
-          setTestAudioTaskStatus(null);
-        }
-      }
-    },
-    [isSwitchingTestAudio, roomid],
-  );
-
   const toggleTagGroup = (id: number) => {
     setSelectedTagGroupIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
     );
-  };
-
-  const selectableTagItems = useMemo<TagItem[]>(
-    () =>
-      manageTags.map((tag) => ({
-        id: String(tag.id),
-        name: tag.name,
-        selected: groupTagIds.includes(tag.id),
-        canClose: false,
-      })),
-    [groupTagIds, manageTags],
-  );
-
-  const selectableEditTagItems = useMemo<TagItem[]>(
-    () =>
-      manageTags.map((tag) => ({
-        id: String(tag.id),
-        name: tag.name,
-        selected: editingTagIds.includes(tag.id),
-        canClose: false,
-      })),
-    [editingTagIds, manageTags],
-  );
-
-  const uniquePlayers = useMemo(() => {
-    const seen = new Set<number>();
-    return players.filter((player) => {
-      if (seen.has(player.id)) {
-        return false;
-      }
-      seen.add(player.id);
-      return true;
-    });
-  }, [players]);
-
-  const handleOpenManageDialog = async () => {
-    manageDialogRef.current?.showModal();
-    setManageSuccess(null);
-    await loadManageData();
-  };
-
-  const handleCreateTag = async () => {
-    const trimmed = newTagName.trim();
-    if (!trimmed) {
-      setManageError("Tag 名称不能为空");
-      return;
-    }
-
-    setIsCreatingTag(true);
-    setManageError(null);
-    setManageSuccess(null);
-    try {
-      const newTags = await createTags([trimmed]);
-      gameStore.getState().addTags(newTags);
-      setNewTagName("");
-      setManageSuccess("Tag 创建成功");
-      await loadManageData();
-      // 创建成功后自动聚焦回输入框
-      newTagInputRef.current?.focus();
-    } catch (err) {
-      setManageError((err as Error).message || "创建 Tag 失败");
-    } finally {
-      setIsCreatingTag(false);
-    }
-  };
-
-  const handleStartEditTag = (tag: Tag) => {
-    setEditingTagId(tag.id);
-    setEditingTagName(tag.name);
-    setManageError(null);
-    setManageSuccess(null);
-    editTagDialogRef.current?.showModal();
-  };
-
-  const handleCancelEditTag = () => {
-    editTagDialogRef.current?.close();
-    setEditingTagId(null);
-    setEditingTagName("");
-  };
-
-  const handleSaveEditTag = async () => {
-    if (!editingTagId) {
-      return;
-    }
-
-    const trimmedName = editingTagName.trim();
-    if (!trimmedName) {
-      setManageError("Tag 名称不能为空");
-      return;
-    }
-
-    setIsUpdatingTag(true);
-    setManageError(null);
-    setManageSuccess(null);
-    try {
-      const updatedTag = await updateTag(editingTagId, trimmedName);
-      gameStore.getState().updateTags([updatedTag]);
-      await loadManageData();
-      setManageSuccess(`Tag「${updatedTag.name}」已更新`);
-      handleCancelEditTag();
-    } catch (err) {
-      setManageError((err as Error).message || "更新 Tag 失败");
-    } finally {
-      setIsUpdatingTag(false);
-    }
-  };
-
-  const handleDeleteTag = (tag: Tag) => {
-    setPendingDeleteTag(tag);
-    deleteTagConfirmDialogRef.current?.showModal();
-  };
-
-  const handleConfirmDeleteTag = async () => {
-    if (!pendingDeleteTag) {
-      return;
-    }
-
-    const tag = pendingDeleteTag;
-    setDeletingTagId(tag.id);
-    setManageError(null);
-    setManageSuccess(null);
-    try {
-      await deleteTag(tag.id);
-      gameStore.getState().removeTags([tag.id]);
-      await loadManageData();
-
-      if (editingTagId === tag.id) {
-        handleCancelEditTag();
-      }
-
-      setManageSuccess(`Tag「${tag.name}」已删除`);
-      deleteTagConfirmDialogRef.current?.close();
-      setPendingDeleteTag(null);
-    } catch (err) {
-      setManageError((err as Error).message || "删除 Tag 失败");
-    } finally {
-      setDeletingTagId(null);
-    }
-  };
-
-  const handleDeleteTagDialogKeyDown = (
-    event: React.KeyboardEvent<HTMLDialogElement>,
-  ) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    if (event.nativeEvent.isComposing) {
-      return;
-    }
-
-    if (!pendingDeleteTag || deletingTagId !== null) {
-      return;
-    }
-
-    event.preventDefault();
-    void handleConfirmDeleteTag();
-  };
-
-  const handleNewTagKeyDown = (
-    event: React.KeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    if (event.nativeEvent.isComposing) {
-      return;
-    }
-
-    event.preventDefault();
-    if (!isCreatingTag) {
-      void handleCreateTag();
-    }
-  };
-
-  const handleCreateTagGroup = async () => {
-    const trimmedGroupName = newGroupName.trim();
-    if (!trimmedGroupName) {
-      setManageError("TagGroup 名称不能为空");
-      return;
-    }
-
-    setIsCreatingGroup(true);
-    setManageError(null);
-    setManageSuccess(null);
-    try {
-      const newGroup = await createTagGroup({
-        name: trimmedGroupName,
-        description: newGroupDescription,
-        existingTagIds: groupTagIds,
-      });
-      gameStore.getState().addTagGroups([newGroup]);
-      setNewGroupName("");
-      setNewGroupDescription("");
-      setGroupTagIds([]);
-      setManageSuccess("TagGroup 创建成功");
-      const refreshedGroups = await loadTagGroups();
-      setManageTagGroups(refreshedGroups);
-    } catch (err) {
-      setManageError((err as Error).message || "创建 TagGroup 失败");
-    } finally {
-      setIsCreatingGroup(false);
-    }
-  };
-
-  const handleStartEditGroup = (group: TagGroup) => {
-    setEditingGroupId(group.id);
-    setEditingGroupName(group.name);
-    setEditingGroupDescription(group.description ?? "");
-    const ids = group.tags.map((tag) => tag.id);
-    setEditingTagIds(ids);
-    setInitialEditingTagIds(ids);
-    setInitialEditingGroupName(group.name);
-    setInitialEditingGroupDescription(group.description ?? "");
-    setManageError(null);
-    setManageSuccess(null);
-    editGroupDialogRef.current?.showModal();
-  };
-
-  const handleCancelEditGroup = () => {
-    editGroupDialogRef.current?.close();
-    setEditingGroupId(null);
-    setEditingGroupName("");
-    setEditingGroupDescription("");
-    setEditingTagIds([]);
-    setInitialEditingTagIds([]);
-    setInitialEditingGroupName("");
-    setInitialEditingGroupDescription("");
-  };
-
-  const handleSaveEditGroup = async () => {
-    if (!editingGroupId) {
-      return;
-    }
-
-    const trimmedName = editingGroupName.trim();
-    if (!trimmedName) {
-      setManageError("TagGroup 名称不能为空");
-      return;
-    }
-
-    const currentTagSet = new Set(editingTagIds);
-    const initialTagSet = new Set(initialEditingTagIds);
-
-    const addExistingTagIds = editingTagIds.filter(
-      (id) => !initialTagSet.has(id),
-    );
-    const removeTagIds = initialEditingTagIds.filter(
-      (id) => !currentTagSet.has(id),
-    );
-
-    const hasNameChanged = trimmedName !== initialEditingGroupName.trim();
-    const hasDescriptionChanged =
-      editingGroupDescription.trim() !== initialEditingGroupDescription.trim();
-    const hasTagChanged =
-      addExistingTagIds.length > 0 || removeTagIds.length > 0;
-
-    if (!hasNameChanged && !hasDescriptionChanged && !hasTagChanged) {
-      setManageSuccess("未检测到修改");
-      return;
-    }
-
-    setIsEditingGroup(true);
-    setManageError(null);
-    setManageSuccess(null);
-    try {
-      const updatedGroup = await patchTagGroup({
-        id: editingGroupId,
-        ...(hasNameChanged ? { name: trimmedName } : {}),
-        ...(hasDescriptionChanged
-          ? { description: editingGroupDescription.trim() }
-          : {}),
-        ...(addExistingTagIds.length > 0 ? { addExistingTagIds } : {}),
-        ...(removeTagIds.length > 0 ? { removeTagIds } : {}),
-      });
-      gameStore.getState().updateTagGroups([updatedGroup]);
-
-      const refreshedGroups = await loadTagGroups();
-      setManageTagGroups(refreshedGroups);
-
-      const finalGroup = refreshedGroups.find(
-        (group) => group.id === editingGroupId,
-      );
-      if (finalGroup) {
-        handleStartEditGroup(finalGroup);
-      }
-
-      setManageSuccess("TagGroup 已更新");
-    } catch (err) {
-      setManageError((err as Error).message || "更新 TagGroup 失败");
-    } finally {
-      setIsEditingGroup(false);
-    }
-  };
-
-  const handleDeleteGroup = async (group: TagGroup) => {
-    setPendingDeleteGroup(group);
-    deleteConfirmDialogRef.current?.showModal();
-  };
-
-  const handleConfirmDeleteGroup = async () => {
-    if (!pendingDeleteGroup) {
-      return;
-    }
-
-    const group = pendingDeleteGroup;
-    setDeletingGroupId(group.id);
-    setManageError(null);
-    setManageSuccess(null);
-
-    try {
-      await deleteTagGroup(group.id);
-      gameStore.getState().removeTagGroups([group.id]);
-
-      const refreshedGroups = await loadTagGroups();
-      setManageTagGroups(refreshedGroups);
-
-      if (editingGroupId === group.id) {
-        handleCancelEditGroup();
-      }
-
-      setManageSuccess(`TagGroup「${group.name}」已删除`);
-      deleteConfirmDialogRef.current?.close();
-      setPendingDeleteGroup(null);
-    } catch (err) {
-      setManageError((err as Error).message || "删除 TagGroup 失败");
-    } finally {
-      setDeletingGroupId(null);
-    }
-  };
-
-  const handleDeleteDialogKeyDown = (
-    event: React.KeyboardEvent<HTMLDialogElement>,
-  ) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-
-    if (event.nativeEvent.isComposing) {
-      return;
-    }
-
-    if (!pendingDeleteGroup || deletingGroupId !== null) {
-      return;
-    }
-
-    event.preventDefault();
-    void handleConfirmDeleteGroup();
   };
 
   const handleSaveSettings = async () => {
@@ -1098,395 +548,6 @@ const RoomManagePage = () => {
     } catch (error) {
       setError((error as Error).message || "解散房间失败");
       console.error("解散房间失败:", error);
-    }
-  };
-
-  const handleOpenTestAudioDialog = async () => {
-    setIsSettingTestAudio(true);
-    setTestAudioSongsPage(1);
-    setTestAudioSongsTotal(0);
-    await loadTestAudioSongs(1, testAudioSearchKw);
-  };
-
-  const handleTestAudioSongsPageChange = async (nextPage: number) => {
-    if (nextPage < 1 || nextPage === testAudioSongsPage) return;
-    setTestAudioSongsPage(nextPage);
-    await loadTestAudioSongs(nextPage, testAudioSearchKw);
-  };
-
-  const handleOpenSongManageDialog = async (tab?: "songs" | "songlists") => {
-    const activeTab = tab ?? songManageTab;
-    if (tab) {
-      setSongManageTab(tab);
-    }
-    songManageDialogRef.current?.showModal();
-    setSongManageSuccess(null);
-    setSongManageError(null);
-    setIsSongManageLoading(true);
-    try {
-      if (activeTab === "songlists") {
-        setSonglistPage(1);
-        setSonglistTotal(0);
-        await loadSonglists(1, songlistSearchKw);
-      } else {
-        setSongPage(1);
-        setSongTotal(0);
-        await loadSongs(1, songSearchKw);
-      }
-    } catch (err) {
-      setSongManageError((err as Error).message || "加载歌曲管理数据失败");
-    } finally {
-      setIsSongManageLoading(false);
-    }
-  };
-
-  const handleCreateSong = async () => {
-    if (!newSong.title?.trim()) {
-      setSongManageError("歌曲标题不能为空");
-      return;
-    }
-    setIsCreatingSong(true);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      await createSong(newSong);
-      setNewSong({});
-      setSongManageSuccess("歌曲创建成功");
-      if (songPage !== 1) {
-        setSongPage(1);
-      }
-      await loadSongs(1, songSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "创建歌曲失败");
-    } finally {
-      setIsCreatingSong(false);
-    }
-  };
-
-  const handleStartEditSong = (song: Song) => {
-    setEditingSongId(song.id);
-    setEditingSongData({
-      platform: song.platform ?? undefined,
-      platform_song_id: song.platform_song_id ?? undefined,
-      title: song.title ?? undefined,
-      subtitle: song.subtitle ?? undefined,
-      artist: song.artist ?? undefined,
-      album_name: song.album_name ?? undefined,
-      album_id: song.album_id ?? undefined,
-      cover_url: song.cover_url ?? undefined,
-      audio_url: song.audio_url ?? undefined,
-      cached_path: song.cached_path ?? undefined,
-      metadata_json: song.metadata_json ?? undefined,
-    });
-    setSongManageError(null);
-    setSongManageSuccess(null);
-  };
-
-  const handleCancelEditSong = () => {
-    setEditingSongId(null);
-    setEditingSongData({});
-  };
-
-  const handleSaveEditSong = async () => {
-    if (!editingSongId) return;
-    if (!editingSongData.title?.trim()) {
-      setSongManageError("歌曲标题不能为空");
-      return;
-    }
-    setIsUpdatingSong(true);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      await updateSong(editingSongId, editingSongData);
-      setSongManageSuccess("歌曲更新成功");
-      handleCancelEditSong();
-      await loadSongs(songPage, songSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "更新歌曲失败");
-    } finally {
-      setIsUpdatingSong(false);
-    }
-  };
-
-  const handleDeleteSong = (songId: number) => {
-    setConfirmDeleteSongId(songId);
-    deleteSongConfirmDialogRef.current?.showModal();
-  };
-
-  const handleConfirmDeleteSong = async () => {
-    if (!confirmDeleteSongId) return;
-
-    setPendingDeleteSongId(confirmDeleteSongId);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      await deleteSong(confirmDeleteSongId);
-      setSongManageSuccess("歌曲删除成功");
-      await loadSongs(songPage, songSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "删除歌曲失败");
-    } finally {
-      setPendingDeleteSongId(null);
-      deleteSongConfirmDialogRef.current?.close();
-      setConfirmDeleteSongId(null);
-    }
-  };
-
-  const handleCreateSonglist = async () => {
-    if (!newSonglistPlatformId.trim()) {
-      setSongManageError("歌单平台ID不能为空");
-      return;
-    }
-    setIsCreatingSonglist(true);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      const payload: CreateSonglistFromPlatformRequest = {
-        platform: newSonglistPlatform,
-        platform_songlist_id: newSonglistPlatformId,
-        cookie_str: newSonglistCookie || undefined,
-      };
-      const { task_id } = await createSonglistFromPlatform(payload);
-      setSongManageSuccess(`歌单创建任务已提交，正在爬取...`);
-      setNewSonglistPlatformId("");
-      setNewSonglistCookie("");
-      setIsCreatingSonglist(false);
-      setIsPollingTask(true);
-
-      const pollTask = async () => {
-        try {
-          const result = await getSonglistTaskResult(task_id);
-          if (result.status === "finished" || result.status === "success") {
-            setSongManageSuccess("歌单导入完成");
-            setIsPollingTask(false);
-            if (pollingRef.current !== null) {
-              window.clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-            if (songlistPage !== 1) {
-              setSonglistPage(1);
-            }
-            await loadSonglists(1, songlistSearchKw);
-          } else if (result.status === "failed") {
-            setSongManageError("歌单导入任务失败");
-            setIsPollingTask(false);
-            if (pollingRef.current !== null) {
-              window.clearInterval(pollingRef.current);
-              pollingRef.current = null;
-            }
-          }
-        } catch (err) {
-          setSongManageError(
-            (err as Error).message || "查询任务状态失败",
-          );
-          setIsPollingTask(false);
-          if (pollingRef.current !== null) {
-            window.clearInterval(pollingRef.current);
-            pollingRef.current = null;
-          }
-        }
-      };
-
-      // 立即查一次，然后每 2s 轮询
-      await pollTask();
-      pollingRef.current = window.setInterval(() => {
-        void pollTask();
-      }, 2000);
-    } catch (err) {
-      setSongManageError((err as Error).message || "创建歌单失败");
-    } finally {
-      setIsCreatingSonglist(false);
-    }
-  };
-
-  const handleDeleteSonglist = (songlistId: number) => {
-    setConfirmDeleteSonglistId(songlistId);
-    deleteSonglistConfirmDialogRef.current?.showModal();
-  };
-
-  const handleConfirmDeleteSonglist = async () => {
-    if (!confirmDeleteSonglistId) return;
-
-    setPendingDeleteSonglistId(confirmDeleteSonglistId);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      await deleteSonglist(confirmDeleteSonglistId);
-      setSongManageSuccess("歌单删除成功");
-      await loadSonglists(songlistPage, songlistSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "删除歌单失败");
-    } finally {
-      setPendingDeleteSonglistId(null);
-      deleteSonglistConfirmDialogRef.current?.close();
-      setConfirmDeleteSonglistId(null);
-    }
-  };
-
-  const handleAddSingleSongToRoom = async () => {
-    if (!addSingleSongId || !roomid) return;
-    setIsAddingSingleSong(true);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      // 使用新的 room_songs API 添加歌曲到房间
-      await addSongsToRoom(roomid, {
-        song_ids: [addSingleSongId],
-        append_to_end: true,
-      });
-      setSongManageSuccess("单曲已添加到房间队列");
-      setAddSingleSongId(null);
-      // 重新加载房间歌曲列表
-      setRoomSongsPage(1);
-      await loadRoomSongs(1, roomSongSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "添加单曲到房间失败");
-    } finally {
-      setIsAddingSingleSong(false);
-    }
-  };
-
-  const handleSetTestAudio = async (songDbId: number) => {
-    if (!roomid || isSwitchingTestAudio) return;
-    await applyTestAudioWithPolling(songDbId, {
-      closeDialogOnSuccess: true,
-    });
-  };
-
-  const handleRemoveSongsFromRoom = async (songIds: number[]) => {
-    if (!roomid || songIds.length === 0) return;
-    setRoomSongsError(null);
-    setRoomSongsSuccess(null);
-    try {
-      await removeSongsFromRoom(roomid, {
-        song_ids: songIds,
-      });
-      setRoomSongsSuccess(`${songIds.length}首歌曲已从房间移除`);
-      setSelectedRoomSongIds([]);
-      const currentPage = roomSongsPage;
-      const data = await loadRoomSongs(currentPage, roomSongSearchKw);
-      if (data && data.list.length === 0 && currentPage > 1) {
-        const prevPage = currentPage - 1;
-        setRoomSongsPage(prevPage);
-        await loadRoomSongs(prevPage, roomSongSearchKw);
-      }
-    } catch (err) {
-      setRoomSongsError((err as Error).message || "从房间移除歌曲失败");
-    }
-  };
-
-  const handleOpenClearRoomSongsConfirm = () => {
-    clearRoomSongsConfirmDialogRef.current?.showModal();
-  };
-
-  const handleClearRoomSongs = async () => {
-    if (!roomid) return;
-    setRoomSongsError(null);
-    setRoomSongsSuccess(null);
-    try {
-      await clearRoomSongs(roomid);
-      setRoomSongsSuccess("房间歌曲已清空");
-      setSelectedRoomSongIds([]);
-      setRoomSongsPage(1);
-      await loadRoomSongs(1, roomSongSearchKw);
-    } catch (err) {
-      setRoomSongsError((err as Error).message || "清空房间歌曲失败");
-    } finally {
-      clearRoomSongsConfirmDialogRef.current?.close();
-    }
-  };
-
-  const handleShuffleRoomSongs = async () => {
-    if (!roomid) return;
-    setIsShufflingRoomSongs(true);
-    setRoomSongsError(null);
-    setRoomSongsSuccess(null);
-    try {
-      await shuffleRoomSongs(roomid);
-      setRoomSongsSuccess("房间歌曲已随机打乱");
-      setSelectedRoomSongIds([]);
-      setRoomSongsPage(1);
-      await loadRoomSongs(1, roomSongSearchKw);
-    } catch (err) {
-      setRoomSongsError((err as Error).message || "打乱房间歌曲失败");
-    } finally {
-      setIsShufflingRoomSongs(false);
-    }
-  };
-
-  const handleKickUser = async (userId: number) => {
-    if (!roomid || !wsClient) return;
-    setIsKicking(userId);
-    setKickError(null);
-    setKickSuccess(null);
-    try {
-      // 发送踢人事件
-      await wsClient.sendJson({
-        event: 15, // KICK_USER
-        data: { user_id: userId },
-      });
-      setKickSuccess("踢人成功");
-      // 3秒后清除成功消息
-      setTimeout(() => {
-        setKickSuccess(null);
-      }, 3000);
-    } catch (err) {
-      setKickError((err as Error).message || "踢人失败");
-      // 3秒后清除错误消息
-      setTimeout(() => {
-        setKickError(null);
-      }, 3000);
-    } finally {
-      setIsKicking(null);
-    }
-  };
-
-  const toggleRoomSongSelection = (songId: number) => {
-    setSelectedRoomSongIds((prev) =>
-      prev.includes(songId)
-        ? prev.filter((id) => id !== songId)
-        : [...prev, songId],
-    );
-  };
-
-  const handleSelectAllRoomSongs = () => {
-    if (!roomSongs || !Array.isArray(roomSongs)) return;
-    if (selectedRoomSongIds.length === roomSongs.length) {
-      setSelectedRoomSongIds([]);
-    } else {
-      setSelectedRoomSongIds(roomSongs.map((song) => song.song_id));
-    }
-  };
-
-  const handleBindSonglistToRoom = async () => {
-    if (!bindSonglistId || !roomid) return;
-    setIsBindingSonglist(true);
-    setSongManageError(null);
-    setSongManageSuccess(null);
-    try {
-      // 先获取歌单详情，获取其中的歌曲ID列表
-      const songlistDetail = await getSonglistDetail(bindSonglistId);
-      if (!songlistDetail.songs || songlistDetail.songs.length === 0) {
-        setSongManageError("该歌单中没有歌曲");
-        return;
-      }
-      const songIds = songlistDetail.songs.map((song) => song.id);
-      // 使用room_songs API添加所有歌曲
-      await addSongsToRoom(roomid, {
-        song_ids: songIds,
-        append_to_end: true,
-      });
-      setSongManageSuccess(
-        `歌单 "${songlistDetail.title || "未命名歌单"}" 已绑定到房间，添加了 ${songIds.length} 首歌曲`,
-      );
-      setBindSonglistId(null);
-      // 重新加载房间歌曲列表
-      setRoomSongsPage(1);
-      await loadRoomSongs(1, roomSongSearchKw);
-    } catch (err) {
-      setSongManageError((err as Error).message || "绑定歌单到房间失败");
-    } finally {
-      setIsBindingSonglist(false);
     }
   };
 

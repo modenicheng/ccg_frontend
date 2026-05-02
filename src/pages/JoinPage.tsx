@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { joinRoom, getRoomInfo } from "../api/room";
-import { syncRoomAuthToSession, syncRoomAuthCookie } from "../utils/roomAuth";
+import { syncRoomAuthToSession, syncRoomAuthCookie, clearRoomAuthForRoom } from "../utils/roomAuth";
+import { ExistingCredentialDialog } from "../components/ExistingCredentialDialog";
 import usePersistStore from "../stores/persistStore";
 
 const JoinPage = () => {
@@ -17,6 +18,46 @@ const JoinPage = () => {
   const [isFetchingRoom, setIsFetchingRoom] = useState(true);
 
   const roomId = roomid?.trim() ?? "";
+
+  const credDialogRef = useRef<HTMLDialogElement>(null);
+  const [existingUser, setExistingUser] = useState<{
+    id: number;
+    roomId: string;
+    username: string;
+    token: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!roomId) {
+      setExistingUser(null);
+      return;
+    }
+    const existing = usePersistStore.getState().getRoomUser(roomId);
+    if (existing) {
+      setExistingUser(existing);
+    } else {
+      setExistingUser(null);
+    }
+  }, [roomId]);
+
+  useEffect(() => {
+    if (existingUser && !isFetchingRoom) {
+      credDialogRef.current?.showModal();
+    }
+  }, [existingUser, isFetchingRoom]);
+
+  const handleGoToRoom = () => {
+    if (!existingUser) return;
+    credDialogRef.current?.close();
+    navigate(`/room/${existingUser.roomId}`);
+  };
+
+  const handleClearAndContinue = () => {
+    if (!existingUser) return;
+    clearRoomAuthForRoom(existingUser.roomId);
+    setExistingUser(null);
+    credDialogRef.current?.close();
+  };
 
   // 获取房间信息
   useEffect(() => {
@@ -194,6 +235,16 @@ const JoinPage = () => {
           </button>
         </div>
       </div>
+
+      {existingUser && (
+        <ExistingCredentialDialog
+          dialogRef={credDialogRef}
+          username={existingUser.username}
+          roomId={existingUser.roomId}
+          onGoToRoom={handleGoToRoom}
+          onClearAndContinue={handleClearAndContinue}
+        />
+      )}
     </div>
   );
 };
