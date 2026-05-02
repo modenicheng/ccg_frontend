@@ -10,7 +10,7 @@ import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
 import { audioPlayer } from "../audioPlayer";
 import { useIsOwner, useAudioContextInterceptor } from "../hooks";
-import type { RoomState, PlayerScore } from "../types/store";
+import type { RoomState } from "../types/store";
 import {
   SongInfoCard,
   SettingDialog,
@@ -57,15 +57,17 @@ import {
   getPlayersSimple,
   getTagGroupsSimple,
 } from "../types/wsMessages";
-import { syncRoomAuthToSession } from "../utils/roomAuth";
-import { clearCookie, copyTextToClipboard, parseErrorMessage } from "../utils/common";
+import { syncRoomAuthToSession, clearRoomAuthForRoom } from "../utils/roomAuth";
+import { copyTextToClipboard, parseErrorMessage } from "../utils/common";
 import { buildRoomWsUrl } from "../utils/wsEndpoint";
 import {
   getActiveAnswerQueue,
   mergeRoundAnswersFromRoomState,
+  logAudioTrigger,
+  buildRankMap,
+  applyScoreDeltaUpdate,
 } from "../utils/gameHelpers";
 
-const development = import.meta.env.DEV;
 const WS_RETRY = { max: 10 };
 const AUDIO_SYNC_THRESHOLD_MS = 20;
 const CANVAS_INIT_DELAY_MS = 0;
@@ -77,72 +79,6 @@ const ROOM_ID_COPY_FEEDBACK_MS = 1800;
 const ROUND_SUMMARY_AUTO_CLOSE_MS = 8000;
 
 let domProgressPercent = 0;
-
-const logAudioTrigger = (
-  source: "PRELOAD" | "ROOM_STATE" | "ROUND_START",
-  url: string,
-) => {
-  if (!development) {
-    return;
-  }
-  const ts = Date.now();
-  console.debug(`[AUDIO_TRIGGER] source=${source} url=${url} ts=${ts}`);
-};
-
-const clearRoomIdentityStorage = (roomId: string) => {
-  const tokenKey = `ccg-room-token:${roomId}`;
-  const userIdKey = `ccg-room-user-id:${roomId}`;
-  const usernameKey = `ccg-room-username:${roomId}`;
-
-  sessionStorage.removeItem(tokenKey);
-  sessionStorage.removeItem(userIdKey);
-  sessionStorage.removeItem(usernameKey);
-
-  clearCookie(tokenKey);
-  clearCookie(userIdKey);
-  clearCookie(usernameKey);
-};
-
-const buildRankMap = (scores: PlayerScore[]) => {
-  const sortedScores = [...scores].sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
-    }
-    return a.player_id - b.player_id;
-  });
-
-  const rankMap: Record<number, number> = {};
-  sortedScores.forEach((entry, index) => {
-    rankMap[entry.player_id] = index + 1;
-  });
-
-  return rankMap;
-};
-
-const applyScoreDeltaUpdate = (
-  previousScores: PlayerScore[],
-  deltaScores: Array<{ player_id: number; username: string; score: number }>,
-) => {
-  const previousByPlayerId = new Map<number, PlayerScore>(
-    previousScores.map((item) => [item.player_id, item]),
-  );
-
-  const nextByPlayerId = new Map<number, PlayerScore>(
-    previousScores.map((item) => [item.player_id, { ...item }]),
-  );
-
-  deltaScores.forEach((item) => {
-    const previous = previousByPlayerId.get(item.player_id);
-    const nextTotal = (previous?.score ?? 0) + item.score;
-    nextByPlayerId.set(item.player_id, {
-      player_id: item.player_id,
-      username: item.username || previous?.username || `玩家${item.player_id}`,
-      score: nextTotal,
-    });
-  });
-
-  return Array.from(nextByPlayerId.values());
-};
 
 function RoomPage() {
   const { roomid } = useParams();
@@ -2035,7 +1971,7 @@ function RoomPage() {
       setCurrentAnsweringPlayer((prev) => (prev === kickedUserId ? null : prev));
 
       if (userIdRef.current === kickedUserId) {
-        clearRoomIdentityStorage(roomId);
+        clearRoomAuthForRoom(roomId);
         removeUser(kickedUserId);
         pushToast({ message: "你已被房主移出房间", variant: "error" });
         wsRef.current?.close();
