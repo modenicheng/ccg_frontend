@@ -73,125 +73,146 @@ export interface RoundSummary {
 }
 
 export interface RoomWsHandlerContext {
-  // Identity
+  // Identity (required)
   roomId: string;
-  userIdRef: MutableRefObject<number | null>;
-  wsAuthToken: string;
+  userIdRef?: MutableRefObject<number | null>;
+  wsAuthToken?: string;
 
-  // Audio refs
+  // Audio refs (required)
   audioRef: MutableRefObject<audioPlayer | null>;
   currentAudioUrlRef: MutableRefObject<string | null>;
-  switchingAudioUrlRef: MutableRefObject<string | null>;
   isProgressDraggingRef: MutableRefObject<boolean>;
   shouldForcePlaybackResyncRef: MutableRefObject<boolean>;
-  hasCheckedInitialPlaybackPromptRef: MutableRefObject<boolean>;
-  hasUserInteractedRef: MutableRefObject<boolean>;
   recentPreloadByUrlRef: MutableRefObject<Record<string, number>>;
-  playbackSyncSuppressionDepthRef: MutableRefObject<number>;
+  switchingAudioUrlRef?: MutableRefObject<string | null>;
+  hasCheckedInitialPlaybackPromptRef?: MutableRefObject<boolean>;
+  hasUserInteractedRef?: MutableRefObject<boolean>;
+  playbackSyncSuppressionDepthRef?: MutableRefObject<number>;
 
-  // State setters
+  // State setters (shared — required)
   setOnlinePlayers: Dispatch<SetStateAction<WsPlayer[]>>;
   setAnswerOrderByUserId: Dispatch<SetStateAction<Record<number, number>>>;
   setPlayerAnswers: Dispatch<SetStateAction<PlayerAnswer[]>>;
   setTagGroups: Dispatch<SetStateAction<WsTagGroup[]>>;
-  setSelectedTagByGroup: Dispatch<SetStateAction<Record<number, number | null>>>;
   setCurrentAnsweringPlayer: Dispatch<SetStateAction<number | null>>;
-  setIsAnswerModalOpen: Dispatch<SetStateAction<boolean>>;
-  setIsAnswerModalMinimized: Dispatch<SetStateAction<boolean>>;
   setIsJudging: Dispatch<SetStateAction<boolean>>;
-  setHasJudgingSubmitted: Dispatch<SetStateAction<boolean>>;
   setCurrentSong: Dispatch<SetStateAction<SongInfo | null>>;
-  setCurrentSongId: Dispatch<SetStateAction<number | null>>;
-  setHistoryTagIds: Dispatch<SetStateAction<number[]>>;
-  setReferenceDescriptions: Dispatch<SetStateAction<string[]>>;
-  setPlayerDescriptions: Dispatch<SetStateAction<PlayerDescription[]>>;
-  setSelectedTags: Dispatch<SetStateAction<Record<number, number | null>>>;
-  setSelectedDescriptions: Dispatch<SetStateAction<number[]>>;
-  setRoundSummary: Dispatch<SetStateAction<RoundSummary | null>>;
-  setIsRoundSummaryOpen: Dispatch<SetStateAction<boolean>>;
   setRoomOwner: Dispatch<SetStateAction<string>>;
   setCurrentAudioUrl: Dispatch<SetStateAction<string | null>>;
-  setNeedsGesturePromptOnInit: Dispatch<SetStateAction<boolean>>;
-  setDescription: Dispatch<SetStateAction<string>>;
 
-  // Callbacks
+  // State setters (room-only — optional)
+  setSelectedTagByGroup?: Dispatch<SetStateAction<Record<number, number | null>>>;
+  setIsAnswerModalOpen?: Dispatch<SetStateAction<boolean>>;
+  setIsAnswerModalMinimized?: Dispatch<SetStateAction<boolean>>;
+  setHasJudgingSubmitted?: Dispatch<SetStateAction<boolean>>;
+  setCurrentSongId?: Dispatch<SetStateAction<number | null>>;
+  setHistoryTagIds?: Dispatch<SetStateAction<number[]>>;
+  setReferenceDescriptions?: Dispatch<SetStateAction<string[]>>;
+  setPlayerDescriptions?: Dispatch<SetStateAction<PlayerDescription[]>>;
+  setSelectedTags?: Dispatch<SetStateAction<Record<number, number | null>>>;
+  setSelectedDescriptions?: Dispatch<SetStateAction<number[]>>;
+  setRoundSummary?: Dispatch<SetStateAction<RoundSummary | null>>;
+  setIsRoundSummaryOpen?: Dispatch<SetStateAction<boolean>>;
+  setNeedsGesturePromptOnInit?: Dispatch<SetStateAction<boolean>>;
+  setDescription?: Dispatch<SetStateAction<string>>;
+
+  // Callbacks (shared — required)
   syncAnswerQueueState: (queue: AnswerQueueItem[], tailPlayerId: number | null) => void;
-  addAttemptOrder: (userId: number) => void;
   applyRemoteProgress: (message: PlayControlMessage, force?: boolean) => void;
-  tryPlayUrlWithRetry: (url: string, maxRetries?: number) => Promise<boolean>;
-  withPlaybackSyncSuppressed: (task: () => Promise<void>) => Promise<void>;
-  switchAudioSourceIfNeeded: (url: string) => Promise<void>;
   buildPlaybackStatusFromPlayControl: (message: PlayControlMessage) => PlaybackState | null;
   syncPlaybackStatusToRoomState: (status: PlaybackState) => void;
-  reportAudioError: (errorType: "load_failed" | "sync_failed", reason: string) => Promise<void>;
-  notifyAudioLoadError: (message: string) => void;
-  closeRoundSummaryDialog: () => void;
-
-  // Round state reset
   resetRoundTransientState: () => void;
 
-  // External dependencies
-  navigate: (to: string, opts?: { replace?: boolean }) => void;
-  pushToast: (opts: { message: string; variant: "error" | "success" | "info" }) => void;
-  addUser: (user: { id: number; roomId: string; username: string; token: string; isOwner: boolean }) => void;
-  removeUser: (id: number) => void;
+  // Callbacks (room-only — optional)
+  addAttemptOrder?: (userId: number) => void;
+  tryPlayUrlWithRetry?: (url: string, maxRetries?: number) => Promise<boolean>;
+  withPlaybackSyncSuppressed?: (task: () => Promise<void>) => Promise<void>;
+  switchAudioSourceIfNeeded?: (url: string) => Promise<void>;
+  reportAudioError?: (errorType: "load_failed" | "sync_failed", reason: string) => Promise<void>;
+  notifyAudioLoadError?: (message: string) => void;
+  closeRoundSummaryDialog?: () => void;
+
+  // External dependencies (room-only — optional)
+  navigate?: (to: string, opts?: { replace?: boolean }) => void;
+  pushToast?: (opts: { message: string; variant: "error" | "success" | "info" }) => void;
+  addUser?: (user: { id: number; roomId: string; username: string; token: string; isOwner: boolean }) => void;
+  removeUser?: (id: number) => void;
 }
 
 export function registerRoomEventHandlers(
   ws: WS,
   ctx: RoomWsHandlerContext,
 ): () => void {
+  const noop = () => {};
+  const noopAsync = async () => {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const noopSetState: Dispatch<SetStateAction<any>> = noop;
+
   const {
     roomId,
-    userIdRef,
-    wsAuthToken,
+    userIdRef = { current: null },
+    wsAuthToken = "",
     audioRef,
     currentAudioUrlRef,
-    switchingAudioUrlRef,
+    switchingAudioUrlRef = { current: null },
     isProgressDraggingRef,
     shouldForcePlaybackResyncRef,
-    hasCheckedInitialPlaybackPromptRef,
-    hasUserInteractedRef,
+    hasCheckedInitialPlaybackPromptRef = { current: true },
+    hasUserInteractedRef = { current: true },
     recentPreloadByUrlRef,
     setOnlinePlayers,
     setAnswerOrderByUserId,
     setPlayerAnswers,
     setTagGroups,
-    setSelectedTagByGroup,
+    setSelectedTagByGroup = noopSetState,
     setCurrentAnsweringPlayer,
-    setIsAnswerModalOpen,
-    setIsAnswerModalMinimized,
+    setIsAnswerModalOpen = noop,
+    setIsAnswerModalMinimized = noop,
     setIsJudging,
-    setHasJudgingSubmitted,
+    setHasJudgingSubmitted = noop,
     setCurrentSong,
-    setCurrentSongId,
-    setHistoryTagIds,
-    setReferenceDescriptions,
-    setPlayerDescriptions,
-    setSelectedTags,
-    setSelectedDescriptions,
-    setRoundSummary,
-    setIsRoundSummaryOpen,
+    setCurrentSongId = noop,
+    setHistoryTagIds = noop,
+    setReferenceDescriptions = noop,
+    setPlayerDescriptions = noop,
+    setSelectedTags = noop,
+    setSelectedDescriptions = noop,
+    setRoundSummary = noop,
+    setIsRoundSummaryOpen = noop,
     setRoomOwner,
     setCurrentAudioUrl,
-    setNeedsGesturePromptOnInit,
-    setDescription,
+    setNeedsGesturePromptOnInit = noop,
+    setDescription = noop,
     syncAnswerQueueState,
-    addAttemptOrder,
+    addAttemptOrder = noop,
     applyRemoteProgress,
-    tryPlayUrlWithRetry,
-    withPlaybackSyncSuppressed,
-    switchAudioSourceIfNeeded,
+    tryPlayUrlWithRetry = async (url: string) => {
+      if (!audioRef.current) return false;
+      try {
+        await audioRef.current.playUrlAsStream(url, false);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    withPlaybackSyncSuppressed = async (task: () => Promise<void>) => { await task(); },
+    switchAudioSourceIfNeeded = async (url: string) => {
+      if (!audioRef.current) return;
+      await audioRef.current.preload(url);
+      await audioRef.current.playUrlAsStream(url, false);
+      currentAudioUrlRef.current = url;
+      setCurrentAudioUrl(url);
+    },
     buildPlaybackStatusFromPlayControl,
     syncPlaybackStatusToRoomState,
-    reportAudioError,
-    notifyAudioLoadError,
-    closeRoundSummaryDialog,
+    reportAudioError = noopAsync,
+    notifyAudioLoadError = noop,
+    closeRoundSummaryDialog = noop,
     resetRoundTransientState,
-    navigate,
-    pushToast,
-    addUser,
-    removeUser,
+    navigate = noop,
+    pushToast = noop,
+    addUser = noop,
+    removeUser = noop,
   } = ctx;
 
   let isDisposed = false;
