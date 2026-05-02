@@ -36,7 +36,6 @@ export function useRoomAudio(options: UseRoomAudioOptions) {
     roomStatus,
     roomId,
     isConnected,
-    latencyAvg,
     initialVolume,
     setupAudioPlayerInterceptor,
     handleAudioPromptClick,
@@ -469,9 +468,10 @@ export function useRoomAudio(options: UseRoomAudioOptions) {
     };
   }, [setupAudioPlayerInterceptor, wsRef]);
 
-  // Canvas init
+  // Canvas init — only needs roomId + WS connection; latency is NOT required
+  // (spectator endpoint may not respond to heartbeats, leaving latencyAvg null)
   useEffect(() => {
-    if (!roomId || !isConnected || latencyAvg === null) {
+    if (!roomId || !isConnected) {
       return;
     }
 
@@ -500,7 +500,7 @@ export function useRoomAudio(options: UseRoomAudioOptions) {
         canvasInitTimerRef.current = null;
       }
     };
-  }, [isConnected, latencyAvg, roomId]);
+  }, [isConnected, roomId]);
 
   // Volume sync
   useEffect(() => {

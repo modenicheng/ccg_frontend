@@ -1,15 +1,16 @@
 import clsx from "clsx";
 import { Icon } from "@iconify-icon/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { WS } from "../wsClient";
 import { GameEventId } from "../types/eventTypes";
 import { startHeartbeat } from "../wsClient/handlers";
 import useWebSocketStore from "../stores/webSocketStore";
+import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
-import { audioPlayer } from "../audioPlayer";
 import { useAudioContextInterceptor } from "../hooks";
+import { useRoomAudio } from "../hooks/useRoomAudio";
 import { UserBar, SongInfoCard } from "../components";
 import type {
   WsTagGroup,
@@ -28,8 +29,6 @@ import {
 } from "./roomWsHandlers";
 
 const WS_RETRY = { max: 10 };
-const AUDIO_SYNC_THRESHOLD_MS = 20;
-const CANVAS_INIT_DELAY_MS = 0;
 
 function SpectatorPage() {
   const { roomid } = useParams();
@@ -43,13 +42,17 @@ function SpectatorPage() {
     setUrl,
     setRoomId,
     setWsClient,
-    getCalibratedNow,
   } = useWebSocketStore();
   const {
     theme,
     volume: persistVolume,
+    setVolume: setPersistVolume,
+    addUser,
+    removeUser,
   } = usePersistStore();
-  const initialVolumeRef = useRef<number>(persistVolume);
+  const pushToast = useErrorToastStore((state) => state.pushToast);
+  const navigate = useNavigate();
+
   const roomState = useGameStore((state) => state.roomState);
   const scores = useGameStore((state) => state.scores);
   const [roomOwner, setRoomOwner] = useState<string>("-");
@@ -72,9 +75,14 @@ function SpectatorPage() {
   const {
     showAudioPrompt,
     handleAudioPromptClick,
-    closeAudioPrompt,
     setupAudioPlayerInterceptor,
   } = useAudioContextInterceptor();
+
+  const hasUserInteractedRef = useRef<boolean>(false);
+  const hasCheckedInitialPlaybackPromptRef = useRef<boolean>(false);
+
+  // 窗口 focus 状态 - 用于控制音频音量（与 RoomPage 一致）
+  const [isWindowFocused, setIsWindowFocused] = useState<boolean>(true);
 
   // 玩家作答情况状态
   const [playerAnswers, setPlayerAnswers] = useState<
@@ -96,19 +104,66 @@ function SpectatorPage() {
     }
   }, [roomId, roomState?.title]);
 
-  const audioRef = useRef<audioPlayer | null>(null);
-  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
-  const currentAudioUrlRef = useRef<string | null>(null);
-  const shouldForcePlaybackResyncRef = useRef<boolean>(false);
-  const recentPreloadByUrlRef = useRef<Record<string, number>>({});
+  // 窗口 focus 检测 - 用于控制音频音量（与 RoomPage 一致）
+  useEffect(() => {
+    const handleFocus = () => {
+      setIsWindowFocused(true);
+    };
+    const handleBlur = () => {
+      setIsWindowFocused(false);
+    };
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasParentRef = useRef<HTMLDivElement | null>(null);
-  const canvasInitializedRef = useRef(false);
-  const canvasInitTimerRef = useRef<number | null>(null);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('blur', handleBlur);
 
-  const progressBarRef = useRef<HTMLSpanElement | null>(null);
-  const isProgressDraggingRef = useRef(false);
+    const handleVisibilityChange = () => {
+      const focused = !document.hidden;
+      setIsWindowFocused(focused);
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // --- useRoomAudio hook (isOwner = false，不发送任何控制消息) ---
+  const {
+    audioRef,
+    canvasRef,
+    canvasParentRef,
+    progressBarRef,
+    isProgressDraggingRef,
+    currentAudioUrlRef,
+    shouldForcePlaybackResyncRef,
+    recentPreloadByUrlRef,
+    switchingAudioUrlRef,
+    playbackSyncSuppressionDepthRef,
+    setCurrentAudioUrl,
+    needsGesturePromptOnInit,
+    setNeedsGesturePromptOnInit,
+    applyRemoteProgress,
+    withPlaybackSyncSuppressed,
+    switchAudioSourceIfNeeded,
+    tryPlayUrlWithRetry,
+    reportAudioError,
+    notifyAudioLoadError,
+  } = useRoomAudio({
+    wsRef,
+    isOwner: false,
+    isWindowFocused,
+    roomStatus: roomState?.status,
+    roomId,
+    isConnected,
+    latencyAvg,
+    initialVolume: persistVolume,
+    setupAudioPlayerInterceptor,
+    handleAudioPromptClick,
+    setPersistVolume,
+    pushToast,
+  });
 
   const sortedOnlinePlayers = useMemo(() => {
     return [...onlinePlayers].sort((a, b) => {
@@ -166,55 +221,6 @@ function SpectatorPage() {
       return acc;
     }, {});
   }, [roomState?.answer_queue, roomState?.answer_queue_tail_player_id]);
-
-  const applyRemoteProgress = useCallback(
-    (message: PlayControlMessage, force = false) => {
-      if (!audioRef.current) {
-        return;
-      }
-
-      if (!isPlayControlData(message?.data)) {
-        return;
-      }
-
-      const controlData = message.data;
-
-      if (isProgressDraggingRef.current) {
-        return;
-      }
-
-      const isPauseEvent = message.event === GameEventId.PAUSE;
-      let expectedMs = Math.max(0, controlData.progress_ms);
-
-      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示“冻结时刻”，不应继续累加 elapsed
-      if (!isPauseEvent) {
-        const now = getCalibratedNow();
-        const offsetTs =
-          typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
-            ? controlData.offset_ts
-            : message.ts;
-        const elapsed = Math.max(0, now - offsetTs);
-        expectedMs = Math.max(0, controlData.progress_ms + elapsed);
-      }
-
-      const localMs = audioRef.current.currentTimeMs;
-      const shouldSeek =
-        force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
-
-      const latestRoomState = gameStore.getState().roomState;
-      const shouldSeekOnPause =
-        latestRoomState?.status === "waiting" ||
-        latestRoomState?.playback_status?.current_order === -1;
-
-      if (shouldSeek && (!isPauseEvent || shouldSeekOnPause)) {
-        const durationMs = audioRef.current.durationMs;
-        const clamped =
-          durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
-        audioRef.current.progressMs = clamped;
-      }
-    },
-    [getCalibratedNow],
-  );
 
   const resetRoundTransientState = useCallback(() => {
     setAnswerOrderByUserId({});
@@ -315,18 +321,8 @@ function SpectatorPage() {
         audio_url: audioUrl,
       };
     },
-    [],
+    [currentAudioUrlRef],
   );
-
-  useEffect(() => {
-    currentAudioUrlRef.current = currentAudioUrl;
-  }, [currentAudioUrl]);
-
-  useEffect(() => {
-    if (!isConnected) {
-      shouldForcePlaybackResyncRef.current = true;
-    }
-  }, [isConnected]);
 
   const addAttemptOrder = useCallback((userId: number) => {
     setAnswerOrderByUserId((prev) => {
@@ -341,6 +337,24 @@ function SpectatorPage() {
     });
   }, []);
 
+  // 标记用户交互（用于 AudioContext 手势恢复检测）
+  useEffect(() => {
+    const markUserInteraction = () => {
+      hasUserInteractedRef.current = true;
+    };
+
+    window.addEventListener("pointerdown", markUserInteraction, {
+      passive: true,
+      once: true,
+    });
+    window.addEventListener("keydown", markUserInteraction, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", markUserInteraction);
+      window.removeEventListener("keydown", markUserInteraction);
+    };
+  }, []);
+
   useEffect(() => {
     if (!roomId) {
       return;
@@ -353,11 +367,17 @@ function SpectatorPage() {
 
     const disposeHandlers = registerRoomEventHandlers(wsRef.current, {
       roomId,
+      userIdRef: { current: null },
+      wsAuthToken: "",
       audioRef,
       currentAudioUrlRef,
+      switchingAudioUrlRef,
       isProgressDraggingRef,
       shouldForcePlaybackResyncRef,
+      hasCheckedInitialPlaybackPromptRef,
+      hasUserInteractedRef,
       recentPreloadByUrlRef,
+      playbackSyncSuppressionDepthRef,
       setOnlinePlayers,
       setAnswerOrderByUserId,
       setPlayerAnswers,
@@ -367,12 +387,23 @@ function SpectatorPage() {
       setCurrentSong,
       setRoomOwner,
       setCurrentAudioUrl,
+      setNeedsGesturePromptOnInit,
       syncAnswerQueueState,
+      addAttemptOrder,
       applyRemoteProgress,
+      tryPlayUrlWithRetry,
+      withPlaybackSyncSuppressed,
+      switchAudioSourceIfNeeded,
       buildPlaybackStatusFromPlayControl,
       syncPlaybackStatusToRoomState,
+      reportAudioError,
+      notifyAudioLoadError,
+      closeRoundSummaryDialog: () => {},
       resetRoundTransientState,
-      addAttemptOrder,
+      navigate,
+      pushToast,
+      addUser,
+      removeUser,
     });
 
     wsRef.current.onConnectionStateChange(setConnected);
@@ -383,8 +414,8 @@ function SpectatorPage() {
     const stopHeartbeat = startHeartbeat(wsRef.current, 1000, 1000);
 
     return () => {
-      stopHeartbeat();
       disposeHandlers();
+      stopHeartbeat();
       wsRef.current?.close();
       wsRef.current = undefined;
       setWsClient(undefined);
@@ -394,6 +425,8 @@ function SpectatorPage() {
     addAttemptOrder,
     applyRemoteProgress,
     buildPlaybackStatusFromPlayControl,
+    reportAudioError,
+    tryPlayUrlWithRetry,
     roomId,
     resetRoundTransientState,
     setConnected,
@@ -402,73 +435,23 @@ function SpectatorPage() {
     setWsClient,
     syncAnswerQueueState,
     syncPlaybackStatusToRoomState,
+    switchAudioSourceIfNeeded,
+    notifyAudioLoadError,
+    navigate,
+    pushToast,
+    addUser,
+    removeUser,
+    withPlaybackSyncSuppressed,
+    audioRef,
+    currentAudioUrlRef,
+    isProgressDraggingRef,
+    playbackSyncSuppressionDepthRef,
+    recentPreloadByUrlRef,
+    setCurrentAudioUrl,
+    setNeedsGesturePromptOnInit,
+    shouldForcePlaybackResyncRef,
+    switchingAudioUrlRef,
   ]);
-
-  useEffect(() => {
-    audioRef.current = new audioPlayer();
-    audioRef.current.volume = initialVolumeRef.current;
-    audioRef.current.onTimeUpdate = (ev) => {
-      if (progressBarRef.current && !isProgressDraggingRef.current) {
-        const audioElement = ev.target as HTMLAudioElement;
-        const progressPercent =
-          audioElement.duration > 0
-            ? (audioElement.currentTime / audioElement.duration) * 100
-            : 0;
-        progressBarRef.current.style.width = `${progressPercent}%`;
-      }
-    };
-    
-    // 设置 AudioContext 拦截检测回调
-    setupAudioPlayerInterceptor(audioRef.current);
-    
-    return () => {
-      if (canvasInitTimerRef.current !== null) {
-        window.clearTimeout(canvasInitTimerRef.current);
-        canvasInitTimerRef.current = null;
-      }
-      canvasInitializedRef.current = false;
-      audioRef.current?.cleanup();
-      audioRef.current = null;
-    };
-  }, [setupAudioPlayerInterceptor]);
-
-  useEffect(() => {
-    if (!roomId || !isConnected || latencyAvg === null) {
-      return;
-    }
-
-    if (canvasInitializedRef.current || canvasInitTimerRef.current !== null) {
-      return;
-    }
-
-    canvasInitTimerRef.current = window.setTimeout(() => {
-      canvasInitTimerRef.current = null;
-      if (
-        canvasInitializedRef.current ||
-        !audioRef.current ||
-        !canvasRef.current ||
-        !canvasParentRef.current
-      ) {
-        return;
-      }
-
-      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
-      canvasInitializedRef.current = true;
-    }, CANVAS_INIT_DELAY_MS);
-
-    return () => {
-      if (canvasInitTimerRef.current !== null) {
-        window.clearTimeout(canvasInitTimerRef.current);
-        canvasInitTimerRef.current = null;
-      }
-    };
-  }, [isConnected, latencyAvg, roomId]);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = persistVolume;
-    }
-  }, [persistVolume]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -687,13 +670,13 @@ function SpectatorPage() {
         </div>
       </div>
 
-      {/* AudioContext 被浏览器拦截时的提示弹窗 */}
-      {showAudioPrompt && (
+      {/* AudioContext 被浏览器拦截时的提示弹窗（与 RoomPage 一致） */}
+      {(showAudioPrompt || needsGesturePromptOnInit) && (
         <dialog className="modal modal-open" open>
-          <div className="modal-box">
-            <h3 className="font-bold text-lg">需要您的操作</h3>
+          <div className="modal-box max-w-md">
+            <h3 className="font-bold text-lg">浏览器已阻止自动播放</h3>
             <p className="py-4">
-              浏览器已暂停音频播放，请点击下方按钮恢复音频。
+              请先点击页面任意位置（或按任意键），系统会自动尝试恢复播放。
             </p>
             <div className="modal-action">
               <button
@@ -701,16 +684,10 @@ function SpectatorPage() {
                 className="btn btn-primary"
                 onClick={() => {
                   handleAudioPromptClick(audioRef.current);
+                  setNeedsGesturePromptOnInit(false);
                 }}
               >
-                恢复音频播放
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={closeAudioPrompt}
-              >
-                稍后处理
+                立即恢复播放
               </button>
             </div>
           </div>
