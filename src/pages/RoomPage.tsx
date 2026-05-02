@@ -8,8 +8,8 @@ import useWebSocketStore from "../stores/webSocketStore";
 import useErrorToastStore from "../stores/errorToastStore";
 import usePersistStore from "../stores/persistStore";
 import { gameStore, useGameStore } from "../stores/gameStore";
-import { audioPlayer } from "../audioPlayer";
 import { useIsOwner, useAudioContextInterceptor } from "../hooks";
+import { useRoomAudio } from "../hooks/useRoomAudio";
 import {
   SongInfoCard,
   SettingDialog,
@@ -48,15 +48,9 @@ import {
 import { registerRoomEventHandlers } from "./roomWsHandlers";
 
 const WS_RETRY = { max: 10 };
-const AUDIO_SYNC_THRESHOLD_MS = 20;
-const CANVAS_INIT_DELAY_MS = 0;
 const VOLUME_HOTKEY_STEP = 5;
-const VOLUME_TOAST_HIDE_DELAY_MS = 3000;
-const VOLUME_TOAST_EXIT_ANIMATION_MS = 220;
 const ROOM_ID_COPY_FEEDBACK_MS = 1800;
 const ROUND_SUMMARY_AUTO_CLOSE_MS = 8000;
-
-let domProgressPercent = 0;
 
 function RoomPage() {
   const { roomid } = useParams();
@@ -101,8 +95,6 @@ function RoomPage() {
       ? fallbackUserIdFromSession
       : null);
 
-  const [localVolume, setLocalVolume] = useState<number>(persistVolume);
-  const initialVolumeRef = useRef<number>(persistVolume);
   const roomState = useGameStore((state) => state.roomState);
   const scores = useGameStore((state) => state.scores);
   const [roomOwner, setRoomOwner] = useState<string>("-");
@@ -172,10 +164,53 @@ function RoomPage() {
     handleAudioPromptClick,
     setupAudioPlayerInterceptor,
   } = useAudioContextInterceptor();
-  const [needsGesturePromptOnInit, setNeedsGesturePromptOnInit] =
-    useState<boolean>(false);
   const hasUserInteractedRef = useRef<boolean>(false);
   const hasCheckedInitialPlaybackPromptRef = useRef<boolean>(false);
+
+  // --- useRoomAudio hook ---
+  const {
+    audioRef,
+    canvasRef,
+    canvasParentRef,
+    progressBarRef,
+    isProgressDraggingRef,
+    currentAudioUrlRef,
+    shouldForcePlaybackResyncRef,
+    recentPreloadByUrlRef,
+    switchingAudioUrlRef,
+    playbackSyncSuppressionDepthRef,
+    audioState,
+    localVolume,
+    setCurrentAudioUrl,
+    isVolumeToastVisible,
+    isVolumeToastClosing,
+    needsGesturePromptOnInit,
+    setNeedsGesturePromptOnInit,
+    sendPlaybackControl,
+    setVolume,
+    adjustVolume,
+    showVolumeToast,
+    applyRemoteProgress,
+    withPlaybackSyncSuppressed,
+    switchAudioSourceIfNeeded,
+    tryPlayUrlWithRetry,
+    handleRecoverPlaybackWithGesture,
+    reportAudioError,
+    notifyAudioLoadError,
+  } = useRoomAudio({
+    wsRef,
+    isOwner,
+    isWindowFocused,
+    roomStatus: roomState?.status,
+    roomId,
+    isConnected,
+    latencyAvg,
+    initialVolume: persistVolume,
+    setupAudioPlayerInterceptor,
+    handleAudioPromptClick,
+    setPersistVolume,
+    pushToast,
+  });
 
   const selectGroupTag = (groupId: number, tagId: number) => {
     setSelectedTagByGroup((prev) => ({
@@ -195,24 +230,7 @@ function RoomPage() {
     }
   }, [roomId, roomState?.title]);
 
-  const audioRef = useRef<audioPlayer | null>(null);
-  const isOwnerRef = useRef<boolean>(false);
   const userIdRef = useRef<number | null>(userId);
-  const switchingAudioUrlRef = useRef<string | null>(null);
-  const recentPreloadByUrlRef = useRef<Record<string, number>>({});
-  const sendPlaybackControlRef = useRef<
-    (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => Promise<void>
-  >(async () => {});
-  const playbackSyncSuppressionDepthRef = useRef<number>(0);
-  const [audioState, setAudioState] = useState<string>("suspended");
-  const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
-  const currentAudioUrlRef = useRef<string | null>(null);
-  const shouldForcePlaybackResyncRef = useRef<boolean>(false);
-
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const canvasParentRef = useRef<HTMLDivElement | null>(null);
-  const canvasInitializedRef = useRef(false);
-  const canvasInitTimerRef = useRef<number | null>(null);
 
   const settingDialogRef = useRef<HTMLDialogElement | null>(null);
   const judgingDialogRef = useRef<HTMLDialogElement | null>(null);
@@ -220,13 +238,7 @@ function RoomPage() {
   const removePlayerDialogRef = useRef<HTMLDialogElement | null>(null);
   const [playerToRemove, setPlayerToRemove] = useState<number | null>(null);
 
-  const progressBarRef = useRef<HTMLSpanElement | null>(null);
-  const isProgressDraggingRef = useRef(false);
   const [isBuzzHotkeyActive, setIsBuzzHotkeyActive] = useState(false);
-  const [isVolumeToastVisible, setIsVolumeToastVisible] =
-    useState<boolean>(false);
-  const [isVolumeToastClosing, setIsVolumeToastClosing] =
-    useState<boolean>(false);
   const [roomIdCopyState, setRoomIdCopyState] = useState<
     "idle" | "success" | "error"
   >("idle");
@@ -245,8 +257,6 @@ function RoomPage() {
     }>;
     correctDescriptionIds: number[];
   } | null>(null);
-  const volumeToastHideTimerRef = useRef<number | null>(null);
-  const volumeToastExitTimerRef = useRef<number | null>(null);
   const roomIdCopyTimerRef = useRef<number | null>(null);
   const isPlaybackStateMissing = roomState?.playback_status === null;
   const isWsDisconnected = !isConnected;
@@ -280,41 +290,6 @@ function RoomPage() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
-
-  const notifyAudioLoadError = useCallback((message: string) => {
-    pushToast({ message, variant: "error" });
-  }, [pushToast]);
-
-  /**
-   * 向后端报告音频错误（如加载失败）
-   * 后端收到此消息后，应暂停游戏并通知所有客户端
-   */
-  const reportAudioError = useCallback(
-    async (errorType: "load_failed" | "sync_failed", reason: string) => {
-      if (!wsRef.current?.isConnected()) {
-        console.error("[AUDIO_ERROR_REPORT] WebSocket not connected, cannot report error");
-        return;
-      }
-
-      try {
-        const payload = {
-          event: 255, // Custom error event ID for audio issues
-          ts: Math.round(getCalibratedNow()),
-          data: {
-            error_type: errorType,
-            reason,
-            audio_url: currentAudioUrlRef.current || "unknown",
-          },
-        };
-
-        console.warn("[AUDIO_ERROR_REPORT] Reporting error to backend:", payload);
-        await wsRef.current.sendJson(payload);
-      } catch (err) {
-        console.error("[AUDIO_ERROR_REPORT] Failed to send error report:", err);
-      }
-    },
-    [getCalibratedNow],
-  );
 
   const syncAnswerQueueState = useCallback((
     queue: AnswerQueueItem[],
@@ -407,7 +382,7 @@ function RoomPage() {
         audio_url: audioUrl,
       };
     },
-    [],
+    [currentAudioUrlRef],
   );
 
   const addAttemptOrder = useCallback((userId: number) => {
@@ -422,46 +397,6 @@ function RoomPage() {
       };
     });
   }, []);
-
-  /**
-   * 尝试使用重试机制加载音频流
-   * 失败 2 次后自动向后端报告错误
-   */
-  const tryPlayUrlWithRetry = useCallback(
-    async (url: string, maxRetries: number = 2): Promise<boolean> => {
-      for (let attempt = 0; attempt < maxRetries; attempt++) {
-        try {
-          await audioRef.current?.playUrlAsStream(url, false);
-          console.log(`[TRY_PLAY_URL] Successfully loaded audio on attempt ${attempt + 1}, waiting for canplaythrough...`);
-          // 等待音频加载完成（最多等待 5 秒）
-          const loaded = await audioRef.current?.waitForCanPlayThrough(5000);
-          console.log(`[TRY_PLAY_URL] waitForCanPlayThrough result:`, loaded);
-          if (loaded) {
-            return true;
-          }
-          console.warn(`[TRY_PLAY_URL] Audio not ready after canplaythrough check, attempt ${attempt + 1}/${maxRetries}`);
-        } catch (err) {
-          console.error(
-            `[TRY_PLAY_URL] Attempt ${attempt + 1}/${maxRetries} failed:`,
-            (err as Error).message,
-          );
-        }
-        // 若不是最后一次尝试，等待 500ms 后重试
-        if (attempt < maxRetries - 1) {
-          console.log(`[TRY_PLAY_URL] Retrying in 500ms...`);
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-      }
-
-      // 所有重试都失败了，报告错误给后端
-      await reportAudioError(
-        "load_failed",
-        `Failed to load audio URL after ${maxRetries} attempts: ${url}`,
-      );
-      return false;
-    },
-    [reportAudioError],
-  );
 
   const sortedOnlinePlayers = useMemo(() => {
     return [...onlinePlayers].sort((a, b) => {
@@ -577,7 +512,7 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
-  }, [addAttemptOrder, getCalibratedNow, isConnected, userId, roomState?.status]);
+  }, [addAttemptOrder, getCalibratedNow, isConnected, userId, roomState?.status, audioRef]);
 
   const handleSubmitAnswer = useCallback(() => {
     if (!isConnected || !wsRef.current?.isConnected() || userId === null) {
@@ -681,69 +616,6 @@ function RoomPage() {
 
     void wsRef.current.sendJson(payload);
   }, [getCalibratedNow, roomState?.statusCode, isOwner]);
-
-  const sendPlaybackControl = useCallback(
-    async (event: (typeof GameEventId)["PLAY" | "PAUSE" | "SEEK"]) => {
-      if (!isOwner || !wsRef.current?.isConnected() || !audioRef.current) {
-        return;
-      }
-
-      const shouldSuppressOutboundSync =
-        playbackSyncSuppressionDepthRef.current > 0 &&
-        (event === GameEventId.PLAY || event === GameEventId.PAUSE);
-
-      if (event === GameEventId.PLAY) {
-        await audioRef.current.resume();
-      } else if (event === GameEventId.PAUSE) {
-        await audioRef.current.pause();
-      }
-
-      if (shouldSuppressOutboundSync) {
-        return;
-      }
-
-      const latestRoomState = gameStore.getState().roomState;
-      const resolvedAudioUrl =
-        currentAudioUrl ||
-        currentAudioUrlRef.current ||
-        audioRef.current.getCurrentUrl?.() ||
-        latestRoomState?.playback_status?.audio_url ||
-        null;
-
-      // 若没有有效的音频URL，不发送播放控制消息
-      if (!resolvedAudioUrl) {
-        console.error("[PLAY_CONTROL] Cannot send playback control: no valid audio_url available");
-        return;
-      }
-
-      if (resolvedAudioUrl !== currentAudioUrlRef.current) {
-        currentAudioUrlRef.current = resolvedAudioUrl;
-      }
-      if (resolvedAudioUrl !== currentAudioUrl) {
-        setCurrentAudioUrl(resolvedAudioUrl);
-      }
-
-      const progressMs = audioRef.current.currentTimeMs;
-      const calibratedNow = Math.round(getCalibratedNow());
-      const latestPlaybackStatus = latestRoomState?.playback_status;
-      const payload: PlayControlMessage = {
-        event,
-        ts: calibratedNow,
-        data: {
-          progress_ms: progressMs,
-          offset_ts: calibratedNow,
-          audio_url: resolvedAudioUrl,
-          current_order:
-            typeof latestPlaybackStatus?.current_order === "number"
-              ? latestPlaybackStatus.current_order
-              : 0,
-        },
-      };
-
-      await wsRef.current.sendJson(payload);
-    },
-    [getCalibratedNow, isOwner, currentAudioUrl],
-  );
 
   const handleTogglePlayPause = useCallback(() => {
     if (isPlaybackStateMissing) {
@@ -907,107 +779,6 @@ function RoomPage() {
     });
   };
 
-  const applyRemoteProgress = useCallback(
-    (message: PlayControlMessage, force = false) => {
-      if (!audioRef.current) {
-        return;
-      }
-
-      if (!isPlayControlData(message?.data)) {
-        return;
-      }
-
-      const controlData = message.data;
-
-      if (isProgressDraggingRef.current) {
-        return;
-      }
-
-      const isPauseEvent = message.event === GameEventId.PAUSE;
-      let expectedMs = Math.max(0, controlData.progress_ms);
-
-      // PLAY/SEEK 才按 offset_ts 外推；PAUSE 表示"冻结时刻"，不应继续累加 elapsed
-      if (!isPauseEvent) {
-        const now = getCalibratedNow();
-        const offsetTs =
-          typeof controlData.offset_ts === "number" && controlData.offset_ts > 0
-            ? controlData.offset_ts
-            : message.ts;
-        const elapsed = Math.max(0, now - offsetTs);
-        expectedMs = Math.max(0, controlData.progress_ms + elapsed);
-      }
-
-      const localMs = audioRef.current.currentTimeMs;
-      const shouldSeek =
-        force || Math.abs(localMs - expectedMs) > AUDIO_SYNC_THRESHOLD_MS;
-
-      const latestRoomState = gameStore.getState().roomState;
-      const isWaitingLoopingWarmup = latestRoomState?.status === "waiting";
-      const shouldSeekOnPause =
-        latestRoomState?.status === "waiting" ||
-        latestRoomState?.playback_status?.current_order === -1;
-
-      const durationMs = audioRef.current.durationMs;
-      if (isWaitingLoopingWarmup && durationMs > 0) {
-        expectedMs = ((expectedMs % durationMs) + durationMs) % durationMs;
-      }
-
-      // 对局中 PAUSE 继续保持“默认不 seek”，避免抢答时回拉；
-      // 但预热 BGM / test audio（waiting 或 current_order=-1）必须 seek 才能实现房主与玩家暂停位点同步。
-      if (shouldSeek && (!isPauseEvent || shouldSeekOnPause)) {
-        const clamped =
-          durationMs > 0 ? Math.min(expectedMs, durationMs) : expectedMs;
-        audioRef.current.progressMs = clamped;
-      }
-    },
-    [getCalibratedNow],
-  );
-
-  const withPlaybackSyncSuppressed = useCallback(
-    async (task: () => Promise<void>) => {
-      playbackSyncSuppressionDepthRef.current += 1;
-      try {
-        await task();
-      } finally {
-        playbackSyncSuppressionDepthRef.current = Math.max(
-          0,
-          playbackSyncSuppressionDepthRef.current - 1,
-        );
-      }
-    },
-    [],
-  );
-
-  const handleRecoverPlaybackWithGesture = useCallback(async () => {
-    await handleAudioPromptClick(audioRef.current);
-
-    const latestPlaybackStatus = gameStore.getState().roomState?.playback_status;
-    if (!latestPlaybackStatus || latestPlaybackStatus.play_state !== "playing") {
-      return;
-    }
-
-    const pseudoMessage: PlayControlMessage = {
-      event: GameEventId.PLAY,
-      ts: latestPlaybackStatus.updated_at,
-      data: {
-        progress_ms: latestPlaybackStatus.progress_ms,
-        offset_ts: latestPlaybackStatus.offset_ts,
-        audio_url: latestPlaybackStatus.audio_url,
-        current_order: latestPlaybackStatus.current_order,
-      },
-    };
-
-    await withPlaybackSyncSuppressed(async () => {
-      applyRemoteProgress(pseudoMessage, true);
-      await audioRef.current?.resume();
-    });
-    setNeedsGesturePromptOnInit(false);
-  }, [
-    applyRemoteProgress,
-    handleAudioPromptClick,
-    withPlaybackSyncSuppressed,
-  ]);
-
   useEffect(() => {
     const markUserInteraction = () => {
       hasUserInteractedRef.current = true;
@@ -1026,60 +797,8 @@ function RoomPage() {
   }, []);
 
   useEffect(() => {
-    currentAudioUrlRef.current = currentAudioUrl;
-  }, [currentAudioUrl]);
-
-  useEffect(() => {
     userIdRef.current = userId;
   }, [userId]);
-
-  const switchAudioSourceIfNeeded = useCallback(
-    async (nextAudioUrl: string) => {
-      const player = audioRef.current;
-      if (!player) {
-        return;
-      }
-
-      if (nextAudioUrl === currentAudioUrlRef.current) {
-        return;
-      }
-
-      if (switchingAudioUrlRef.current === nextAudioUrl) {
-        return;
-      }
-
-      const previousAudioUrl = currentAudioUrlRef.current;
-      switchingAudioUrlRef.current = nextAudioUrl;
-      currentAudioUrlRef.current = nextAudioUrl;
-
-      try {
-        await player.playUrlAsStream(nextAudioUrl, false);
-        setCurrentAudioUrl(nextAudioUrl);
-      } catch (error) {
-        currentAudioUrlRef.current = previousAudioUrl;
-        throw error;
-      } finally {
-        if (switchingAudioUrlRef.current === nextAudioUrl) {
-          switchingAudioUrlRef.current = null;
-        }
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    isOwnerRef.current = isOwner;
-  }, [isOwner]);
-
-  useEffect(() => {
-    if (!isConnected) {
-      shouldForcePlaybackResyncRef.current = true;
-    }
-  }, [isConnected]);
-
-  useEffect(() => {
-    sendPlaybackControlRef.current = sendPlaybackControl;
-  }, [sendPlaybackControl]);
 
   useEffect(() => {
     if (!roomId || !wsAuthToken || userId === null) {
@@ -1200,249 +919,16 @@ function RoomPage() {
     wsAuthUsername,
     closeRoundSummaryDialog,
     withPlaybackSyncSuppressed,
+    audioRef,
+    currentAudioUrlRef,
+    isProgressDraggingRef,
+    playbackSyncSuppressionDepthRef,
+    recentPreloadByUrlRef,
+    setCurrentAudioUrl,
+    setNeedsGesturePromptOnInit,
+    shouldForcePlaybackResyncRef,
+    switchingAudioUrlRef,
   ]);
-
-  useEffect(() => {
-    audioRef.current = new audioPlayer();
-    audioRef.current.volume = initialVolumeRef.current;
-    audioRef.current.onStateChange = (nextState) => {
-      setAudioState(nextState);
-    };
-    setAudioState(audioRef.current.state);
-    
-    // 设置 AudioContext 拦截检测回调
-    setupAudioPlayerInterceptor(audioRef.current);
-    
-    audioRef.current.onEnded = () => {
-      if (!isOwnerRef.current || !wsRef.current?.isConnected()) {
-        return;
-      }
-      // 曲目播放完毕，仅暂停播放
-      void sendPlaybackControlRef.current(GameEventId.PAUSE);
-    };
-    audioRef.current.onTimeUpdate = (ev) => {
-      if (progressBarRef.current && !isProgressDraggingRef.current) {
-        const audioElement = ev.target as HTMLAudioElement;
-        const progressPercent =
-          audioElement.duration > 0
-            ? (audioElement.currentTime / audioElement.duration) * 100
-            : 0;
-        progressBarRef.current.style.width = `${progressPercent}%`;
-      }
-    };
-    return () => {
-      if (canvasInitTimerRef.current !== null) {
-        window.clearTimeout(canvasInitTimerRef.current);
-        canvasInitTimerRef.current = null;
-      }
-      canvasInitializedRef.current = false;
-      audioRef.current?.cleanup();
-      audioRef.current = null;
-    };
-  }, [setupAudioPlayerInterceptor]);
-
-  useEffect(() => {
-    if (!roomId || !isConnected || latencyAvg === null) {
-      return;
-    }
-
-    if (canvasInitializedRef.current || canvasInitTimerRef.current !== null) {
-      return;
-    }
-
-    canvasInitTimerRef.current = window.setTimeout(() => {
-      canvasInitTimerRef.current = null;
-      if (
-        canvasInitializedRef.current ||
-        !audioRef.current ||
-        !canvasRef.current ||
-        !canvasParentRef.current
-      ) {
-        return;
-      }
-
-      audioRef.current.initCanvas(canvasRef.current, canvasParentRef.current);
-      canvasInitializedRef.current = true;
-    }, CANVAS_INIT_DELAY_MS);
-
-    return () => {
-      if (canvasInitTimerRef.current !== null) {
-        window.clearTimeout(canvasInitTimerRef.current);
-        canvasInitTimerRef.current = null;
-      }
-    };
-  }, [isConnected, latencyAvg, roomId]);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = localVolume;
-    }
-  }, [localVolume]);
-
-  // WAITING 阶段默认循环播放（预热保活），PLAYING 阶段默认播完即停
-  useEffect(() => {
-    if (!audioRef.current) {
-      return;
-    }
-
-    audioRef.current.setLoop(roomState?.status === "waiting");
-  }, [roomState?.status]);
-
-  // 根据窗口 focus 状态与房间状态动态调整音量（每个客户端独立处理）
-  useEffect(() => {
-    if (!audioRef.current) {
-      return;
-    }
-
-    // PLAYING：禁用失焦静音，始终使用用户设定音量
-    // WAITING：失焦时降到极低音量 0.0001，保持后台音频链路活跃
-    // 其他状态：沿用原有失焦静音策略
-    const roomStatus = roomState?.status;
-    const targetVolume =
-      roomStatus === "playing"
-        ? localVolume
-        : !isWindowFocused
-          ? roomStatus === "waiting"
-            ? 0.0001
-            : 0
-          : localVolume;
-
-    audioRef.current.volume = targetVolume;
-  }, [isWindowFocused, localVolume, roomState?.status]);
-
-  useEffect(() => {
-    const parent = canvasParentRef.current;
-    if (!parent) {
-      return;
-    }
-
-    if (!isOwner) {
-      return;
-    }
-
-    const onMouseDown = (ev: MouseEvent) => {
-      isProgressDraggingRef.current = true;
-      progressBarRef.current?.classList.add("no-transition");
-      domProgressPercent = Math.max(
-        0,
-        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
-      );
-      if (progressBarRef.current) {
-        progressBarRef.current.style.width = `${domProgressPercent}%`;
-      }
-    };
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!isProgressDraggingRef.current) return;
-      domProgressPercent = Math.max(
-        0,
-        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
-      );
-      if (progressBarRef.current) {
-        progressBarRef.current.style.width = `${domProgressPercent}%`;
-      }
-    };
-
-    const onMouseUp = (ev: MouseEvent) => {
-      if (!isProgressDraggingRef.current) return;
-      isProgressDraggingRef.current = false;
-      progressBarRef.current?.classList.remove("no-transition");
-      domProgressPercent = Math.max(
-        0,
-        Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
-      );
-      if (progressBarRef.current) {
-        progressBarRef.current.style.width = `${domProgressPercent}%`;
-      }
-      if (audioRef.current) {
-        audioRef.current.progress = domProgressPercent;
-      }
-      void sendPlaybackControl(GameEventId.SEEK);
-    };
-
-    const onMouseLeave = (ev: MouseEvent) => {
-      if (!isProgressDraggingRef.current) return;
-      if (ev.offsetX <= 0 || ev.offsetX >= parent.clientWidth) {
-        domProgressPercent = Math.max(
-          0,
-          Math.min(100, (ev.offsetX / (parent.clientWidth || 1)) * 100),
-        );
-        if (progressBarRef.current) {
-          progressBarRef.current.style.width = `${domProgressPercent}%`;
-        }
-        if (audioRef.current) {
-          audioRef.current.progress = domProgressPercent;
-        }
-        void sendPlaybackControl(GameEventId.SEEK);
-      }
-      isProgressDraggingRef.current = false;
-      progressBarRef.current?.classList.remove("no-transition");
-    };
-
-    parent.addEventListener("mousedown", onMouseDown);
-    parent.addEventListener("mousemove", onMouseMove);
-    parent.addEventListener("mouseup", onMouseUp);
-    parent.addEventListener("mouseleave", onMouseLeave);
-
-    return () => {
-      parent.removeEventListener("mousedown", onMouseDown);
-      parent.removeEventListener("mousemove", onMouseMove);
-      parent.removeEventListener("mouseup", onMouseUp);
-      parent.removeEventListener("mouseleave", onMouseLeave);
-    };
-  }, [sendPlaybackControl, isOwner]);
-
-  const showVolumeToast = useCallback(() => {
-    setIsVolumeToastClosing(false);
-    setIsVolumeToastVisible(true);
-    if (volumeToastHideTimerRef.current !== null) {
-      window.clearTimeout(volumeToastHideTimerRef.current);
-    }
-    if (volumeToastExitTimerRef.current !== null) {
-      window.clearTimeout(volumeToastExitTimerRef.current);
-      volumeToastExitTimerRef.current = null;
-    }
-
-    volumeToastHideTimerRef.current = window.setTimeout(() => {
-      setIsVolumeToastClosing(true);
-      volumeToastHideTimerRef.current = null;
-
-      volumeToastExitTimerRef.current = window.setTimeout(() => {
-        setIsVolumeToastVisible(false);
-        setIsVolumeToastClosing(false);
-        volumeToastExitTimerRef.current = null;
-      }, VOLUME_TOAST_EXIT_ANIMATION_MS);
-    }, VOLUME_TOAST_HIDE_DELAY_MS);
-  }, []);
-
-  const setVolume = useCallback(
-    (value: number) => {
-      const safeValue = Math.max(0, Math.min(200, value));
-      setLocalVolume(safeValue);
-      setPersistVolume(safeValue);
-
-      if (audioRef.current) {
-        audioRef.current.volume = safeValue;
-      }
-    },
-    [setPersistVolume],
-  );
-
-  const adjustVolume = useCallback(
-    (delta: number) => {
-      setLocalVolume((previousVolume) => {
-        const nextVolume = Math.max(0, Math.min(200, previousVolume + delta));
-        setPersistVolume(nextVolume);
-
-        if (audioRef.current) {
-          audioRef.current.volume = nextVolume;
-        }
-
-        return nextVolume;
-      });
-    },
-    [setPersistVolume],
-  );
 
   const handleCopyRoomId = useCallback(async () => {
     if (!roomId) {
@@ -1485,14 +971,6 @@ function RoomPage() {
 
   useEffect(() => {
     return () => {
-      if (volumeToastHideTimerRef.current !== null) {
-        window.clearTimeout(volumeToastHideTimerRef.current);
-        volumeToastHideTimerRef.current = null;
-      }
-      if (volumeToastExitTimerRef.current !== null) {
-        window.clearTimeout(volumeToastExitTimerRef.current);
-        volumeToastExitTimerRef.current = null;
-      }
       if (roomIdCopyTimerRef.current !== null) {
         window.clearTimeout(roomIdCopyTimerRef.current);
         roomIdCopyTimerRef.current = null;
