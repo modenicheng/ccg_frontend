@@ -64,8 +64,10 @@ const isAnsweringOrJudgingRoundState = (roundState: number | string) => {
   return (
     roundState === 2 ||
     roundState === 3 ||
+    roundState === 4 ||
     roundState === "ANSWERING" ||
-    roundState === "JUDGING"
+    roundState === "JUDGING" ||
+    roundState === "COMPLETED"
   );
 };
 
@@ -671,10 +673,9 @@ function SpectatorPage() {
     wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
       GameEventId.ANSWER_BROADCAST,
       (message) => {
-        const rawPlayerId = message?.data?.player_id;
+        const playerIdNum = message?.data?.player_id;
         const selectedTagIds = message?.data?.selected_tag_ids ?? [];
         const descriptionText = message?.data?.description_text ?? "";
-        const playerIdNum = Number.parseInt(rawPlayerId, 10);
 
         if (!Number.isFinite(playerIdNum)) {
           return;
@@ -1198,7 +1199,6 @@ function SpectatorPage() {
       <div className="flex gap-2 w-full">
         <SongInfoCard
           songInfo={isJudging ? currentSong : null}
-          isJudging={isJudging}
           compact={true}
           className="flex-1 basis-0 min-w-0"
           showAlbum={true}

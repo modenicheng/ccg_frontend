@@ -136,8 +136,12 @@ interface BackendRoomInfoResponse {
   status: number;
   round_state?: number;
   title?: string | null;
+  description?: string | null;
   players: Array<{ id: number; username: string; is_owner: boolean }>;
   tag_groups: BackendTagGroupResponse[];
+  song_queue?: string[];
+  play_progress?: number;
+  start_position_percent?: number;
 }
 
 interface BackendPatchRoomRequest {
@@ -193,13 +197,13 @@ const mapRoomInfo = (data: BackendRoomInfoResponse): RoomInfoResponse & { player
               ? 4
               : 0,
     title: data.title ?? null,
-    description: null,
+    description: data.description ?? null,
     players: data.players.map((player) => player.username),
     playersDetailed: data.players,
-    songQueue: [],
+    songQueue: data.song_queue ?? [],
     tagGroups,
-    playProgress: 0,
-    startPositionPercent: 0,
+    playProgress: data.play_progress ?? 0,
+    startPositionPercent: data.start_position_percent ?? 0,
   };
 };
 

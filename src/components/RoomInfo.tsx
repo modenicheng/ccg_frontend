@@ -101,6 +101,7 @@ export function RoomInfo({
             type="button"
             className={clsx("btn btn-ghost btn-xs btn-square shrink-0")}
             onClick={onCopyJoinLink}
+            disabled={!onCopyJoinLink}
             title="复制快速加入链接"
             aria-label="复制快速加入链接"
           >

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Icon } from "@iconify-icon/react";
 import type { WsTagGroup } from "../types/wsMessages";
 import clsx from "clsx";
@@ -21,6 +22,11 @@ export function PlayerAnswersTable({
   tagGroups,
   userId,
 }: PlayerAnswersTableProps) {
+  const sortedAnswers = useMemo(
+    () => [...playerAnswers].sort((a, b) => a.order - b.order),
+    [playerAnswers],
+  );
+
   return (
     <div className="card shadow-sm w-full">
       <div className="card-body p-0">
@@ -49,9 +55,7 @@ export function PlayerAnswersTable({
             </thead>
             <tbody>
               {playerAnswers.length > 0 ? (
-                playerAnswers
-                  .sort((a, b) => a.order - b.order)
-                  .map((answer) => (
+                sortedAnswers.map((answer) => (
                     <tr
                       key={answer.playerId}
                       className={clsx({

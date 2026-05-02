@@ -146,7 +146,6 @@ export function JudgingDialog({
           {currentSong && (
             <SongInfoCard
               songInfo={currentSong}
-              isJudging={true}
               compact={false}
               clickable={true}
               onClick={() => {

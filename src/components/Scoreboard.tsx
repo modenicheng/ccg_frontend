@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import clsx from "clsx";
 
 interface ScoreEntry {
@@ -12,6 +13,11 @@ interface ScoreboardProps {
 }
 
 export function Scoreboard({ scores, userId }: ScoreboardProps) {
+  const sortedScores = useMemo(
+    () => [...scores].sort((a, b) => b.score - a.score),
+    [scores],
+  );
+
   return (
     <div className="card shadow-sm w-full sm:flex-1 min-h-56 sm:max-h-112">
       <div className="card-body overflow-y-auto p-0 max-h-72 sm:max-h-96">
@@ -25,9 +31,7 @@ export function Scoreboard({ scores, userId }: ScoreboardProps) {
           </thead>
           <tbody>
             {scores.length > 0 ? (
-              [...scores]
-                .sort((a, b) => b.score - a.score)
-                .map((player, index) => (
+              sortedScores.map((player, index) => (
                   <tr
                     key={player.player_id}
                     className={clsx({

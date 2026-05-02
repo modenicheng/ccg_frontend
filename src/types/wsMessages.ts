@@ -151,7 +151,7 @@ export interface AnswerQueueMessage {
 }
 
 export interface AnswerBroadcastMessageData {
-  player_id: string;
+  player_id: number;
   selected_tag_ids: number[];
   description_text: string | null;
 }

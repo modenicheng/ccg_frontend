@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 export function useWindowFocus(): boolean {
-  const [isFocused, setIsFocused] = useState(true);
+  const [isFocused, setIsFocused] = useState(() => !document.hidden);
 
   useEffect(() => {
     const handleFocus = () => setIsFocused(true);

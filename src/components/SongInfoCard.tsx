@@ -11,8 +11,6 @@ export interface SongInfo {
 interface SongInfoCardProps {
   /** 曲目信息，为null时显示占位符 */
   songInfo: SongInfo | null;
-  /** 是否正在判分状态（影响显示样式） */
-  isJudging?: boolean;
   /** 是否紧凑模式（用于页面顶部显示） */
   compact?: boolean;
   /** 紧凑模式下使用更大排印（用于RoomPage顶部与同排卡片对齐） */
@@ -37,7 +35,6 @@ interface SongInfoCardProps {
  */
 export function SongInfoCard({
   songInfo,
-  isJudging: _isJudging = false,
   compact = false,
   compactLarge = false,
   clickable = false,
@@ -47,8 +44,6 @@ export function SongInfoCard({
   showPlatformHint = true,
   defaultCoverUrl = "/icon_01.svg",
 }: SongInfoCardProps) {
-  // 如果没有曲目信息，显示占位符
-  void _isJudging;
   if (!songInfo) {
     return (
       <div
@@ -99,11 +94,6 @@ export function SongInfoCard({
               >
                 {compact ? "????????" : "未知艺术家"}
               </div>
-              {!compact && showAlbum && (
-                <div className="text-sm sm:text-md opacity-70 truncate">
-                  {compact ? "????????????????????????" : "未知专辑信息"}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -118,7 +108,7 @@ export function SongInfoCard({
   };
 
   const cardContent = (
-    <div className={clsx("flex flex-row gap-4 min-w-0", { "items-top": compact })}>
+    <div className={clsx("flex flex-row gap-4 min-w-0", { "items-start": compact })}>
       <figure className="shrink-0">
         <img
           className={clsx("rounded-md shrink-0 object-cover", {
@@ -130,7 +120,7 @@ export function SongInfoCard({
           alt={`${songInfo.title} - ${songInfo.artist}`}
         />
       </figure>
-      <div className="flex flex-col gap-1 h-full justify-top flex-1 min-w-0">
+      <div className="flex flex-col gap-1 h-full justify-start flex-1 min-w-0">
         <div>
           <h2
             className={clsx("font-semibold truncate", {
@@ -159,11 +149,6 @@ export function SongInfoCard({
         >
           {songInfo.artist}
         </div>
-        {!compact && showAlbum && (
-          <div className="text-sm sm:text-md opacity-70 truncate">
-            {songInfo.album}
-          </div>
-        )}
         {!compact && songInfo.platformUrl && showPlatformHint && (
           <div className="text-xs sm:text-sm text-blue-500 truncate">
             点击查看曲目详情

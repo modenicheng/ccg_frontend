@@ -1611,10 +1611,9 @@ function RoomPage() {
     wsRef.current.onJsonEvent<AnswerBroadcastMessage>(
       GameEventId.ANSWER_BROADCAST,
       (message) => {
-        const rawPlayerId = message?.data?.player_id;
+        const playerIdNum = message?.data?.player_id;
         const selectedTagIds = message?.data?.selected_tag_ids ?? [];
         const descriptionText = message?.data?.description_text ?? "";
-        const playerIdNum = Number.parseInt(rawPlayerId, 10);
 
         if (!Number.isFinite(playerIdNum)) {
           return;
@@ -2970,7 +2969,6 @@ function RoomPage() {
       <div className="flex flex-col sm:flex-row sm:items-stretch gap-2 w-full h-full">
         <SongInfoCard
           songInfo={currentSong}
-          isJudging={isJudging}
           compact={true}
           compactLarge={true}
           className="flex-1 basis-0 min-w-0"

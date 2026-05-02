@@ -166,6 +166,73 @@ export const syncRoomAuthToSession = (
   sessionStorage.setItem(usernameKey, identity.username);
 };
 
+export const getRoomAuthIdentity = (
+  roomId: string,
+): RoomAuthIdentity | null => {
+  const { normalizedRoomId, tokenKey, userIdKey, usernameKey } =
+    getRoomAuthKeys(roomId);
+  if (!normalizedRoomId) {
+    return null;
+  }
+
+  const tokenFromSession = sessionStorage.getItem(tokenKey)?.trim() || null;
+  const tokenFromCookie = readCookie(tokenKey)?.trim() || null;
+  const userIdFromSession = sessionStorage.getItem(userIdKey)?.trim() || null;
+  const userIdFromCookie = readCookie(userIdKey)?.trim() || null;
+  const usernameFromSession =
+    sessionStorage.getItem(usernameKey)?.trim() || null;
+  const usernameFromCookie = readCookie(usernameKey)?.trim() || null;
+
+  const persistedRoomUser =
+    usePersistStore.getState().getRoomUser(normalizedRoomId) ?? null;
+
+  const token =
+    tokenFromSession ?? tokenFromCookie ?? persistedRoomUser?.token ?? null;
+  const userId =
+    userIdFromSession ??
+    userIdFromCookie ??
+    (persistedRoomUser != null ? `${persistedRoomUser.id}` : null);
+  const username =
+    usernameFromSession ??
+    usernameFromCookie ??
+    persistedRoomUser?.username ??
+    null;
+
+  if (!token || !userId || !username) {
+    return null;
+  }
+
+  const parsedId = Number(userId);
+  if (!Number.isFinite(parsedId)) {
+    return null;
+  }
+
+  return {
+    id: parsedId,
+    username,
+    token,
+  };
+};
+
+export const clearRoomAuthForRoom = (roomId: string) => {
+  const { normalizedRoomId, tokenKey, userIdKey, usernameKey } =
+    getRoomAuthKeys(roomId);
+  if (!normalizedRoomId) {
+    return;
+  }
+
+  syncRoomAuthToSession(normalizedRoomId, null);
+
+  clearCookie(tokenKey);
+  clearCookie(userIdKey);
+  clearCookie(usernameKey);
+
+  const user = usePersistStore.getState().getRoomUser(normalizedRoomId);
+  if (user) {
+    usePersistStore.getState().removeUser(user.id);
+  }
+};
+
 export const syncRoomAuthToCookieAndSession = (
   roomId: string,
   identity: RoomAuthIdentity | null,

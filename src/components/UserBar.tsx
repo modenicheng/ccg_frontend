@@ -39,7 +39,6 @@ export const UserBar: React.FC<UserBarProps> = ({
           "buzz-ordered-item": typeof order === "number",
           "opacity-60": !online,
           "buzz-activate-pop": activate,
-          "opacity-50": !online,
         })}
       >
         <div className="card-body p-2 w-full overflow-hidden">
