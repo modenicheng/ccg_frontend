@@ -17,3 +17,8 @@ export { Scoreboard } from "./Scoreboard";
 export { PlayerList } from "./PlayerList";
 export { PlayerAnswersTable } from "./PlayerAnswersTable";
 export { RoundSummaryDialog } from "./RoundSummaryDialog";
+export { TagManageDialog } from "./TagManageDialog";
+export { SongManageDialog } from "./SongManageDialog";
+export { TestAudioModal } from "./TestAudioModal";
+export { ConfirmActionDialogs } from "./ConfirmActionDialogs";
+export { ExistingCredentialDialog } from "./ExistingCredentialDialog";

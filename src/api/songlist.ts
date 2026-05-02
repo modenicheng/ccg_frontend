@@ -2,22 +2,7 @@ import { http } from "./http";
 import { mapSong } from "./song";
 import type { Song } from "./song";
 
-// Local copy of BackendSong interface to avoid import issues
-interface BackendSong {
-  id: number;
-  platform?: string | null;
-  platform_song_id?: string | null;
-  title?: string | null;
-  subtitle?: string | null;
-  artist?: string | null;
-  album_name?: string | null;
-  album_id?: number | null;
-  cover_url?: string | null;
-  audio_url?: string | null;
-  cached_path?: string | null;
-  cached?: boolean;
-  metadata_json?: string | null;
-}
+import type { BackendSong } from "./song";
 
 export interface Songlist {
   id: number;
