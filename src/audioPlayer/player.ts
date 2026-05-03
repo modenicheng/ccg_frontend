@@ -603,10 +603,16 @@ class audioPlayer {
     if (this.preloadTable[url]) {
       const entry = this.preloadTable[url];
       if (entry.loaded) {
-        console.log(`[PRELOAD] Already loaded for URL: ${url}`);
-        return; // 已加载成功
-      }
-      if (entry.error) {
+        if (entry.audio === this.audioElement) {
+          // The loaded element is the currently connected (tainted) one.
+          // Invalidate it so a fresh element is created below.
+          console.log(`[PRELOAD] Loaded entry is tainted (currently connected), recreating for URL: ${url}`);
+          delete this.preloadTable[url];
+        } else {
+          console.log(`[PRELOAD] Already loaded for URL: ${url}`);
+          return; // 已加载成功
+        }
+      } else if (entry.error) {
         console.log(`[PRELOAD] Previous error found for URL: ${url}, clearing and retrying...`);
         // 清除错误，重试
         delete this.preloadTable[url];
@@ -841,10 +847,17 @@ class audioPlayer {
     if (this.audioElement) {
       this.audioElement.pause();
       this.audioElement.onended = null;
-      this.audioElement.src = ""; // 可选，有助于释放资源
-      this.audioElement.load(); // 重置元素
-      // 注意：不要将 this.audioElement 设为 null，因为之后我们要重新赋值
-      // 但我们要断开源节点
+      this.audioElement.src = "";
+      this.audioElement.load();
+      // Remove the tainted element from the preload table so it won't be
+      // reused later (it can never be passed to createMediaElementSource again).
+      for (const key of Object.keys(this.preloadTable)) {
+        if (this.preloadTable[key].audio === this.audioElement) {
+          delete this.preloadTable[key];
+          break;
+        }
+      }
+      this.audioElement = undefined;
     }
     if (this.sourceNode) {
       this.sourceNode.disconnect();
@@ -1034,16 +1047,15 @@ class audioPlayer {
     this.stopDrawing();
     if (this.audioElement) {
       this.audioElement.pause();
-      this.audioElement.src = ""; // 释放资源
-      this.audioElement.load(); // 重置
+      this.audioElement.src = "";
+      this.audioElement.load();
       this.audioElement.onended = null;
+      this.audioElement = undefined;
     }
     if (this.sourceNode) {
       this.sourceNode.disconnect();
       this.sourceNode = undefined;
     }
-    // 关闭音频上下文（可选，但可能影响后续使用）
-    // this.audioCtx.close();
   }
 }
 

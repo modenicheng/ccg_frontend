@@ -517,11 +517,6 @@ export function registerRoomEventHandlers(
         });
         console.log("[PLAY_EVENT] Audio resumed successfully");
 
-        setAnswerOrderByUserId({});
-        setCurrentAnsweringPlayer(null);
-        setIsJudging(false);
-        setHasJudgingSubmitted(false);
-        setCurrentSong(null);
         console.log("[PLAY_EVENT] PLAY event processed successfully");
       } catch (err) {
         console.error("[PLAY_EVENT] Failed to apply PLAY event:", err);

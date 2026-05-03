@@ -295,12 +295,8 @@ export function registerSpectatorEventHandlers(
         ctx.syncPlaybackStatusToRoomState(nextPlaybackStatus);
       }
 
-      ctx.setAnswerOrderByUserId({});
-      ctx.setCurrentAnsweringPlayer(null);
       ctx.applyRemoteProgress(message, true);
       await ctx.audioRef.current?.resume();
-      ctx.setIsJudging(false);
-      ctx.setCurrentSong(null);
     }),
   );
 
