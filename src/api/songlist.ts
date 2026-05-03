@@ -1,6 +1,7 @@
 import { http } from "./http";
 import { mapSong } from "./song";
 import type { Song } from "./song";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 import type { BackendSong } from "./song";
 
@@ -83,28 +84,41 @@ export interface CreateSonglistFromPlatformRequest {
 }
 
 export async function createSonglistFromPlatform(
+  roomId: string,
   payload: CreateSonglistFromPlatformRequest,
 ): Promise<{ task_id: string }> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.post<{ task_id: string }>(
     "/api/songlists/",
     payload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return data;
 }
 
 export async function updateSonglist(
+  roomId: string,
   songlistId: number,
   payload: Partial<Songlist>,
 ): Promise<Songlist> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.put<BackendSonglist>(
     `/api/songlists/${songlistId}`,
     payload,
+    {
+      params: authQuery ?? undefined,
+    },
   );
   return mapSonglist(data);
 }
 
-export async function deleteSonglist(songlistId: number): Promise<void> {
-  await http.delete(`/api/songlists/${songlistId}`);
+export async function deleteSonglist(roomId: string, songlistId: number): Promise<void> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  await http.delete(`/api/songlists/${songlistId}`, {
+    params: authQuery ?? undefined,
+  });
 }
 
 export interface SonglistTaskResult {

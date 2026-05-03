@@ -178,7 +178,7 @@ export function useSongManagement({
     setSongManageError(null);
     setSongManageSuccess(null);
     try {
-      await createSong(newSong);
+      await createSong(roomid, newSong);
       setNewSong({});
       setSongManageSuccess("歌曲创建成功");
       if (songPage !== 1) {
@@ -226,7 +226,7 @@ export function useSongManagement({
     setSongManageError(null);
     setSongManageSuccess(null);
     try {
-      await updateSong(editingSongId, editingSongData);
+      await updateSong(roomid, editingSongId, editingSongData);
       setSongManageSuccess("歌曲更新成功");
       handleCancelEditSong();
       await loadSongs(songPage, songSearchKw);
@@ -249,7 +249,7 @@ export function useSongManagement({
     setSongManageError(null);
     setSongManageSuccess(null);
     try {
-      await deleteSong(confirmDeleteSongId);
+      await deleteSong(roomid, confirmDeleteSongId);
       setSongManageSuccess("歌曲删除成功");
       await loadSongs(songPage, songSearchKw);
     } catch (err) {
@@ -275,7 +275,7 @@ export function useSongManagement({
         platform_songlist_id: newSonglistPlatformId,
         cookie_str: newSonglistCookie || undefined,
       };
-      const { task_id } = await createSonglistFromPlatform(payload);
+      const { task_id } = await createSonglistFromPlatform(roomid, payload);
       setSongManageSuccess(`歌单创建任务已提交，正在爬取...`);
       setNewSonglistPlatformId("");
       setNewSonglistCookie("");
@@ -339,7 +339,7 @@ export function useSongManagement({
     setSongManageError(null);
     setSongManageSuccess(null);
     try {
-      await deleteSonglist(confirmDeleteSonglistId);
+      await deleteSonglist(roomid, confirmDeleteSonglistId);
       setSongManageSuccess("歌单删除成功");
       await loadSonglists(songlistPage, songlistSearchKw);
     } catch (err) {

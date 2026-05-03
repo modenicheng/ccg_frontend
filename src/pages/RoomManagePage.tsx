@@ -192,6 +192,7 @@ const RoomManagePage = () => {
     selectableTagItems,
     selectableEditTagItems,
   } = useTagManagement({
+    roomid: roomId,
     loadTagGroups,
     onTagGroupsLoaded: setTagGroups,
   });

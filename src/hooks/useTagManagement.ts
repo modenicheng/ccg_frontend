@@ -14,6 +14,7 @@ import { gameStore } from "../stores/gameStore";
 import type { TagItem } from "../types/tag";
 
 interface UseTagManagementOptions {
+  roomid: string;
   loadTagGroups: () => Promise<TagGroup[]>;
   onTagGroupsLoaded: (groups: TagGroup[]) => void;
 }
@@ -93,6 +94,7 @@ interface UseTagManagementReturn {
 }
 
 export function useTagManagement({
+  roomid,
   loadTagGroups,
   onTagGroupsLoaded,
 }: UseTagManagementOptions): UseTagManagementReturn {
@@ -178,7 +180,7 @@ export function useTagManagement({
     setManageError(null);
     setManageSuccess(null);
     try {
-      const newTags = await createTags([trimmed]);
+      const newTags = await createTags(roomid, [trimmed]);
       gameStore.getState().addTags(newTags);
       setNewTagName("");
       setManageSuccess("Tag 创建成功");
@@ -189,7 +191,7 @@ export function useTagManagement({
     } finally {
       setIsCreatingTag(false);
     }
-  }, [newTagName, loadManageData]);
+  }, [roomid, newTagName, loadManageData]);
 
   const handleStartEditTag = useCallback((tag: Tag) => {
     setEditingTagId(tag.id);
@@ -220,7 +222,7 @@ export function useTagManagement({
     setManageError(null);
     setManageSuccess(null);
     try {
-      const updatedTag = await apiUpdateTag(editingTagId, trimmedName);
+      const updatedTag = await apiUpdateTag(roomid, editingTagId, trimmedName);
       gameStore.getState().updateTags([updatedTag]);
       await loadManageData();
       setManageSuccess(`Tag「${updatedTag.name}」已更新`);
@@ -230,7 +232,7 @@ export function useTagManagement({
     } finally {
       setIsUpdatingTag(false);
     }
-  }, [editingTagId, editingTagName, loadManageData, handleCancelEditTag]);
+  }, [roomid, editingTagId, editingTagName, loadManageData, handleCancelEditTag]);
 
   const handleDeleteTag = useCallback((tag: Tag) => {
     setPendingDeleteTag(tag);
@@ -247,7 +249,7 @@ export function useTagManagement({
     setManageError(null);
     setManageSuccess(null);
     try {
-      await apiDeleteTag(tag.id);
+      await apiDeleteTag(roomid, tag.id);
       gameStore.getState().removeTags([tag.id]);
       await loadManageData();
 
@@ -264,6 +266,7 @@ export function useTagManagement({
       setDeletingTagId(null);
     }
   }, [
+    roomid,
     pendingDeleteTag,
     editingTagId,
     loadManageData,
@@ -319,7 +322,7 @@ export function useTagManagement({
     setManageError(null);
     setManageSuccess(null);
     try {
-      const newGroup = await apiCreateTagGroup({
+      const newGroup = await apiCreateTagGroup(roomid, {
         name: trimmedGroupName,
         description: newGroupDescription,
         existingTagIds: groupTagIds,
@@ -336,7 +339,7 @@ export function useTagManagement({
     } finally {
       setIsCreatingGroup(false);
     }
-  }, [newGroupName, newGroupDescription, groupTagIds, loadTagGroups]);
+  }, [roomid, newGroupName, newGroupDescription, groupTagIds, loadTagGroups]);
 
   const handleStartEditGroup = useCallback((group: TagGroup) => {
     setEditingGroupId(group.id);
@@ -399,7 +402,7 @@ export function useTagManagement({
     setManageError(null);
     setManageSuccess(null);
     try {
-      const updatedGroup = await patchTagGroup({
+      const updatedGroup = await patchTagGroup(roomid, {
         id: editingGroupId,
         ...(hasNameChanged ? { name: trimmedName } : {}),
         ...(hasDescriptionChanged
@@ -427,6 +430,7 @@ export function useTagManagement({
       setIsEditingGroup(false);
     }
   }, [
+    roomid,
     editingGroupId,
     editingGroupName,
     editingGroupDescription,
@@ -454,7 +458,7 @@ export function useTagManagement({
     setManageSuccess(null);
 
     try {
-      await apiDeleteTagGroup(group.id);
+      await apiDeleteTagGroup(roomid, group.id);
       gameStore.getState().removeTagGroups([group.id]);
 
       const refreshedGroups = await loadTagGroups();
@@ -473,6 +477,7 @@ export function useTagManagement({
       setDeletingGroupId(null);
     }
   }, [
+    roomid,
     pendingDeleteGroup,
     editingGroupId,
     loadTagGroups,

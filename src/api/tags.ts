@@ -1,4 +1,5 @@
 import { http } from "./http";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 export interface Tag {
   id: number;
@@ -63,23 +64,32 @@ export async function getTags(limit = 200, offset = 0): Promise<Tag[]> {
   return data.tags.map(mapTag);
 }
 
-export async function createTags(tagNames: string[]): Promise<Tag[]> {
+export async function createTags(roomId: string, tagNames: string[]): Promise<Tag[]> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const normalized = tagNames.map((name) => name.trim()).filter(Boolean);
   const { data } = await http.post<BackendTagListResponse>("/api/tags/", {
     tags: normalized,
+  }, {
+    params: authQuery ?? undefined,
   });
   return data.tags.map(mapTag);
 }
 
-export async function updateTag(tagId: number, name: string): Promise<Tag> {
+export async function updateTag(roomId: string, tagId: number, name: string): Promise<Tag> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const { data } = await http.patch<BackendTag>(`/api/tags/${tagId}`, {
     name: name.trim(),
+  }, {
+    params: authQuery ?? undefined,
   });
   return mapTag(data);
 }
 
-export async function deleteTag(tagId: number): Promise<void> {
-  await http.delete(`/api/tags/${tagId}`);
+export async function deleteTag(roomId: string, tagId: number): Promise<void> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  await http.delete(`/api/tags/${tagId}`, {
+    params: authQuery ?? undefined,
+  });
 }
 
 export async function getTagGroups(
@@ -109,8 +119,10 @@ export interface PatchTagGroupRequest {
 }
 
 export async function createTagGroup(
+  roomId: string,
   payload: CreateTagGroupRequest,
 ): Promise<TagGroup> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const requestBody: BackendCreateTagGroupRequest = {
     name: payload.name.trim(),
     description: payload.description?.trim() || null,
@@ -121,14 +133,19 @@ export async function createTagGroup(
   const { data } = await http.post<BackendTagGroup>(
     "/api/tags/groups/",
     requestBody,
+    {
+      params: authQuery ?? undefined,
+    },
   );
 
   return mapTagGroup(data);
 }
 
 export async function patchTagGroup(
+  roomId: string,
   payload: PatchTagGroupRequest,
 ): Promise<TagGroup> {
+  const authQuery = getRoomAuthQueryParams(roomId);
   const requestBody: BackendPatchTagGroupRequest = {
     id: payload.id,
   };
@@ -159,11 +176,17 @@ export async function patchTagGroup(
   const { data } = await http.patch<BackendTagGroup>(
     "/api/tags/groups/",
     requestBody,
+    {
+      params: authQuery ?? undefined,
+    },
   );
 
   return mapTagGroup(data);
 }
 
-export async function deleteTagGroup(groupId: number): Promise<void> {
-  await http.delete(`/api/tags/groups/${groupId}`);
+export async function deleteTagGroup(roomId: string, groupId: number): Promise<void> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  await http.delete(`/api/tags/groups/${groupId}`, {
+    params: authQuery ?? undefined,
+  });
 }

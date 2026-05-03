@@ -1,4 +1,5 @@
 import { http } from "./http";
+import { getRoomAuthQueryParams } from "../utils/roomAuth";
 
 export interface Song {
   id: number;
@@ -96,23 +97,33 @@ export interface CreateSongRequest {
   metadata_json?: string;
 }
 
-export async function createSong(payload: CreateSongRequest): Promise<Song> {
-  const { data } = await http.post<BackendSong>("/api/songs/", payload);
+export async function createSong(roomId: string, payload: CreateSongRequest): Promise<Song> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  const { data } = await http.post<BackendSong>("/api/songs/", payload, {
+    params: authQuery ?? undefined,
+  });
   return mapSong(data);
 }
 
 export type UpdateSongRequest = Partial<CreateSongRequest>
 
 export async function updateSong(
+  roomId: string,
   songId: number,
   payload: UpdateSongRequest,
 ): Promise<Song> {
-  const { data } = await http.put<BackendSong>(`/api/songs/${songId}`, payload);
+  const authQuery = getRoomAuthQueryParams(roomId);
+  const { data } = await http.put<BackendSong>(`/api/songs/${songId}`, payload, {
+    params: authQuery ?? undefined,
+  });
   return mapSong(data);
 }
 
-export async function deleteSong(songId: number): Promise<void> {
-  await http.delete(`/api/songs/${songId}`);
+export async function deleteSong(roomId: string, songId: number): Promise<void> {
+  const authQuery = getRoomAuthQueryParams(roomId);
+  await http.delete(`/api/songs/${songId}`, {
+    params: authQuery ?? undefined,
+  });
 }
 
 interface BackendSongTagHistoryOption {
