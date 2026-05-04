@@ -1159,6 +1159,7 @@ export function registerRoomEventHandlers(
       setHasJudgingSubmitted(false);
       setCurrentSong(null);
       setCurrentSongId(null);
+      gameStore.getState().setRoundState("PLAYING_AUDIO", 1);
 
       console.log(`Round ${roundData.round_index} started`, roundData);
     },
@@ -1386,6 +1387,35 @@ export function registerRoomEventHandlers(
       }
     },
   );
+
+  // ── Error rollback: ATTEMPT_ANSWER rejection ──────────────────────
+  ws.onJsonEvent<{
+    event: number;
+    data?: { message?: string; error_event?: number };
+  }>(EventType.MESSAGE as unknown as GameEventId, (message) => {
+    const errorEvent = message?.data?.error_event;
+    if (errorEvent !== GameEventId.ATTEMPT_ANSWER) {
+      return;
+    }
+
+    const currentUserId = userIdRef.current;
+    if (currentUserId === null) {
+      return;
+    }
+
+    setAnswerOrderByUserId((prev) => {
+      if (!(currentUserId in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[currentUserId];
+      return next;
+    });
+
+    console.debug(
+      `[error-rollback] Reverted optimistic buzz for user ${currentUserId}`,
+    );
+  });
 
   return () => {
     isDisposed = true;

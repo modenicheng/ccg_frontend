@@ -18,6 +18,10 @@ export const getActiveAnswerQueue = (
   return queue.slice(tailIndex + 1);
 };
 
+export const canBuzz = (roundStateCode: number): boolean => {
+  return roundStateCode === 1 || roundStateCode === 2;
+};
+
 export const isAnsweringOrJudgingRoundState = (
   roundState: number | string,
 ): boolean => {

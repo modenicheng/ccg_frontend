@@ -5,6 +5,7 @@ interface BuzzButtonProps {
   isConnected: boolean;
   isCurrentPlayerInAnswerQueue: boolean;
   isBuzzHotkeyActive: boolean;
+  canBuzzInCurrentRound: boolean;
   user: UserState | undefined;
   roomStatus: string | undefined;
   onBuzz: () => void;
@@ -14,12 +15,13 @@ export function BuzzButton({
   isConnected,
   isCurrentPlayerInAnswerQueue,
   isBuzzHotkeyActive,
+  canBuzzInCurrentRound,
   user,
   roomStatus,
   onBuzz,
 }: BuzzButtonProps) {
   const isDisabled =
-    !isConnected || isCurrentPlayerInAnswerQueue || !user || roomStatus !== "playing";
+    !isConnected || isCurrentPlayerInAnswerQueue || !user || roomStatus !== "playing" || !canBuzzInCurrentRound;
 
   return (
     <div className="card shadow-sm w-full sm:w-auto">

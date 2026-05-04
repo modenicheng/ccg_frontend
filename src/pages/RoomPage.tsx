@@ -44,6 +44,7 @@ import { copyTextToClipboard } from "../utils/common";
 import { buildRoomWsUrl } from "../utils/wsEndpoint";
 import {
   getActiveAnswerQueue,
+  canBuzz,
 } from "../utils/gameHelpers";
 import { registerRoomEventHandlers } from "./roomWsHandlers";
 
@@ -95,6 +96,7 @@ function RoomPage() {
       : null);
 
   const roomState = useGameStore((state) => state.roomState);
+  const roundStateCode = useGameStore((state) => state.roundStateCode);
   const scores = useGameStore((state) => state.scores);
   const [roomOwner, setRoomOwner] = useState<string>("-");
   const [tagGroups, setTagGroups] = useState<WsTagGroup[]>([]);
@@ -483,6 +485,11 @@ function RoomPage() {
       return;
     }
 
+    if (!canBuzz(roundStateCode)) {
+      console.debug("[buzz] skip: round state does not allow buzzing");
+      return;
+    }
+
     if (userId === null) {
       console.debug("[buzz] skip: missing userId from persist/session/cookie");
       return;
@@ -511,7 +518,7 @@ function RoomPage() {
     };
 
     void wsRef.current.sendJson(payload);
-  }, [addAttemptOrder, getCalibratedNow, isConnected, userId, roomState?.status, audioRef]);
+  }, [addAttemptOrder, getCalibratedNow, isConnected, userId, roomState?.status, roundStateCode, audioRef]);
 
   const { isBuzzHotkeyActive } = useKeyboardShortcuts({
     isConnected,
@@ -1048,6 +1055,7 @@ function RoomPage() {
           isConnected={isConnected}
           isCurrentPlayerInAnswerQueue={isCurrentPlayerInAnswerQueue}
           isBuzzHotkeyActive={isBuzzHotkeyActive}
+          canBuzzInCurrentRound={canBuzz(roundStateCode)}
           user={user}
           roomStatus={roomState?.status}
           onBuzz={handleBuzz}
