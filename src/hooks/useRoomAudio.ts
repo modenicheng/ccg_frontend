@@ -87,6 +87,7 @@ export function useRoomAudio(options: UseRoomAudioOptions) {
   useEffect(() => {
     if (!isConnected) {
       shouldForcePlaybackResyncRef.current = true;
+      recentPreloadByUrlRef.current = {};
     }
   }, [isConnected]);
 

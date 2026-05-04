@@ -14,6 +14,8 @@ interface FrequencyCurvePoint {
   sampleCount?: number;
 }
 
+const MAX_PRELOAD_ENTRIES = 3;
+
 class audioPlayer {
   private audioCtx: AudioContext;
   private canvas?: HTMLCanvasElement;
@@ -603,6 +605,36 @@ class audioPlayer {
     }
   }
 
+  private evictStalePreloadEntries(): void {
+    const keys = Object.keys(this.preloadTable);
+    if (keys.length < MAX_PRELOAD_ENTRIES) {
+      return;
+    }
+
+    const taintedAudio = this.audioElement;
+    const removable: string[] = [];
+
+    for (const key of keys) {
+      const entry = this.preloadTable[key];
+      if (entry.audio === taintedAudio) {
+        continue;
+      }
+      removable.push(key);
+    }
+
+    const excessCount = keys.length - (MAX_PRELOAD_ENTRIES - 1);
+    const toRemove = removable.slice(0, Math.max(0, excessCount));
+
+    for (const key of toRemove) {
+      const entry = this.preloadTable[key];
+      entry.audio.pause();
+      entry.audio.src = "";
+      entry.audio.load();
+      delete this.preloadTable[key];
+      console.log(`[PRELOAD] Evicted stale preload entry: ${key}`);
+    }
+  }
+
   async preload(url: string): Promise<void> {
     if (this.preloadTable[url]) {
       const entry = this.preloadTable[url];
@@ -659,6 +691,7 @@ class audioPlayer {
       };
 
       // 存储预加载引用
+      this.evictStalePreloadEntries();
       this.preloadTable[url] = { audio, loaded: false, error: undefined, retryCount: 0 };
 
       // 开始加载
@@ -1090,6 +1123,13 @@ class audioPlayer {
     if (this.sourceNode) {
       this.sourceNode.disconnect();
       this.sourceNode = undefined;
+    }
+    for (const key of Object.keys(this.preloadTable)) {
+      const entry = this.preloadTable[key];
+      entry.audio.pause();
+      entry.audio.src = "";
+      entry.audio.load();
+      delete this.preloadTable[key];
     }
   }
 }

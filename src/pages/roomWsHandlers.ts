@@ -44,6 +44,7 @@ import {
 
 const AUDIO_SYNC_THRESHOLD_MS = 20;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
+const MAX_PRELOAD_DEDUP_ENTRIES = 20;
 
 function playTurnNotification() {
   try {
@@ -1281,6 +1282,15 @@ export function registerRoomEventHandlers(
         try {
           logAudioTrigger("PRELOAD", audio_url);
           recentPreloadByUrlRef.current[audio_url] = now;
+          const dedupKeys = Object.keys(recentPreloadByUrlRef.current);
+          if (dedupKeys.length > MAX_PRELOAD_DEDUP_ENTRIES) {
+            const entries = dedupKeys.map((k) => [k, recentPreloadByUrlRef.current[k]] as const);
+            entries.sort((a, b) => a[1] - b[1]);
+            const toRemove = entries.slice(0, entries.length - MAX_PRELOAD_DEDUP_ENTRIES);
+            for (const [k] of toRemove) {
+              delete recentPreloadByUrlRef.current[k];
+            }
+          }
           console.log("[PRELOAD_AUDIO] Starting preload for URL:", audio_url);
           await audioRef.current.preload(audio_url);
           console.log("[PRELOAD_AUDIO] Successfully preloaded:", audio_url);
