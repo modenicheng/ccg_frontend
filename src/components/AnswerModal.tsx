@@ -17,6 +17,7 @@ interface AnswerModalProps {
   onDescriptionChange: (desc: string) => void;
   onToggleMinimize: () => void;
   onSubmit: () => void;
+  onClearSelection: () => void;
 }
 
 export function AnswerModal({
@@ -31,6 +32,7 @@ export function AnswerModal({
   onDescriptionChange,
   onToggleMinimize,
   onSubmit,
+  onClearSelection,
 }: AnswerModalProps) {
   const [remainingMs, setRemainingMs] = useState(ANSWER_TIME_LIMIT_MS);
   const submittedRef = useRef(false);
@@ -95,6 +97,7 @@ export function AnswerModal({
           tagGroups={tagGroups}
           selectedTags={selectedTags}
           onSelectTag={onSelectTag}
+          onClearSelection={onClearSelection}
           radioNamePrefix="answer-tag-group"
           showHeader={true}
           headerText="选择 Tags"

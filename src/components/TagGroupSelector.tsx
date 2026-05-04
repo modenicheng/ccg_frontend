@@ -25,6 +25,8 @@ interface TagGroupSelectorProps {
   emptyStateText?: string;
   /** radio 分组名前缀，避免多个选择器之间 name 冲突 */
   radioNamePrefix?: string;
+  /** 清除所有已选标签的回调函数 */
+  onClearSelection?: () => void;
 }
 
 /**
@@ -43,6 +45,7 @@ export function TagGroupSelector({
   showEmptyState = true,
   emptyStateText = "暂无可选标签分组",
   radioNamePrefix = "tag-group",
+  onClearSelection,
 }: TagGroupSelectorProps) {
   if (tagGroups.length === 0 && showEmptyState) {
     return (
@@ -75,15 +78,26 @@ export function TagGroupSelector({
       <div className="card-body">
         {showHeader && (
           <>
-            <h2 className="text-lg font-semibold flex items-center">
-              <Icon
-                icon="heroicons:tag"
-                width={24}
-                height={24}
-                className="inline mr-1"
-              />
-              {headerText}
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold flex items-center">
+                <Icon
+                  icon="heroicons:tag"
+                  width={24}
+                  height={24}
+                  className="inline mr-1"
+                />
+                {headerText}
+              </h2>
+              {!readOnly && onClearSelection && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  onClick={onClearSelection}
+                >
+                  清除
+                </button>
+              )}
+            </div>
             <div className="divider m-0"></div>
           </>
         )}

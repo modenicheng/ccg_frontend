@@ -221,6 +221,10 @@ function RoomPage() {
     }));
   };
 
+  const clearSelectedTags = () => {
+    setSelectedTagByGroup({});
+  };
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -1134,6 +1138,7 @@ function RoomPage() {
         onDescriptionChange={setDescription}
         onToggleMinimize={toggleAnswerModal}
         onSubmit={handleSubmitAnswer}
+        onClearSelection={clearSelectedTags}
       />
 
       <AnswerModalFloatingButton

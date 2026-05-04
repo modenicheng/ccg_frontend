@@ -772,14 +772,27 @@ class audioPlayer {
       throw new Error(`Audio not preloaded for URL: ${url}`);
     }
 
+    // If the preloaded element is the currently connected (tainted) one,
+    // it cannot be reused with createMediaElementSource. Recreate it.
+    if (preloadedEntry.audio === this.audioElement) {
+      console.log(`[USE_PRELOADED] Preloaded element is tainted, recreating for URL: ${url}`);
+      delete this.preloadTable[url];
+      this.cleanupCurrentSource();
+      const freshAudio = new Audio();
+      freshAudio.crossOrigin = "anonymous";
+      freshAudio.preload = "auto";
+      freshAudio.src = url;
+      freshAudio.loop = this.loopEnabled;
+      this.preloadTable[url] = { audio: freshAudio, loaded: false, error: undefined, retryCount: 0 };
+      await this.setupAudioElement(freshAudio, url, playByDefault);
+      return;
+    }
+
     console.log(`[USE_PRELOADED] Switching to preloaded audio for URL: ${url}`);
-    
-    // 1. 完全停止并丢弃旧的音频元素和源节点
+
     this.cleanupCurrentSource();
 
-    // 2. 使用预加载的 audio 元素
     const audio = preloadedEntry.audio;
-    // 确保音频元素属性正确
     audio.crossOrigin = "anonymous";
     audio.preload = "auto";
     audio.loop = this.loopEnabled;

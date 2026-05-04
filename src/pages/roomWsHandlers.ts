@@ -504,27 +504,31 @@ export function registerRoomEventHandlers(
           console.log("[PLAY_EVENT] Audio state check:", {
             hasAudioElement,
             currentUrl,
+            currentAudioUrlRef: currentAudioUrlRef.current,
             targetUrl: audioUrl,
             isPreloaded,
-            urlMatches: currentUrl === audioUrl,
+            urlMatches: currentAudioUrlRef.current === audioUrl,
           });
 
           if (!hasAudioElement) {
             console.log("[PLAY_EVENT] Audio element not initialized, calling playUrlAsStream...");
             await audioRef.current.playUrlAsStream(audioUrl, false);
+            currentAudioUrlRef.current = audioUrl;
             console.log("[PLAY_EVENT] playUrlAsStream completed, waiting for canplaythrough...");
             const loaded = await audioRef.current.waitForCanPlayThrough(5000);
             console.log("[PLAY_EVENT] waitForCanPlayThrough result:", loaded);
             if (!loaded) {
               console.warn("[PLAY_EVENT] Audio loading timeout, but will try to resume anyway");
             }
-          } else if (currentUrl !== audioUrl) {
+          } else if (currentAudioUrlRef.current !== audioUrl) {
             if (isPreloaded) {
               console.log("[PLAY_EVENT] URL changed but audio is preloaded, switching to preloaded audio...");
               await audioRef.current.usePreloadedAudio(audioUrl);
+              currentAudioUrlRef.current = audioUrl;
             } else {
               console.log("[PLAY_EVENT] URL changed and not preloaded, reloading audio...");
               await audioRef.current.playUrlAsStream(audioUrl, false);
+              currentAudioUrlRef.current = audioUrl;
               console.log("[PLAY_EVENT] playUrlAsStream completed (URL changed), waiting for canplaythrough...");
               const loaded = await audioRef.current.waitForCanPlayThrough(5000);
               console.log("[PLAY_EVENT] waitForCanPlayThrough result after URL change:", loaded);
