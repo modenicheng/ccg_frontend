@@ -47,6 +47,10 @@ class audioPlayer {
     );
   };
 
+  // 调度停止相关
+  private pendingStopMs: number | null = null;
+  private pendingStopListener: (() => void) | null = null;
+
   // 动画相关
   private animationFrameId: number | null = null;
   private isDrawing = false; // 防止多次启动动画
@@ -844,6 +848,7 @@ class audioPlayer {
    * 停止当前音频源并清理相关资源
    */
   private cleanupCurrentSource() {
+    this.clearScheduledStop();
     if (this.audioElement) {
       this.audioElement.pause();
       this.audioElement.onended = null;
@@ -866,6 +871,7 @@ class audioPlayer {
   }
 
   async pause() {
+    this.clearScheduledStop();
     if (this.audioElement) {
       this.audioElement.pause();
       this.audioState = "suspended";
@@ -873,7 +879,36 @@ class audioPlayer {
     }
   }
 
+  /**
+   * 调度音频在到达指定进度（毫秒）时自动暂停。
+   * 音频会继续播放，直到 currentTimeMs >= targetMs，然后自然暂停。
+   */
+  scheduleStopAt(targetMs: number): void {
+    this.clearScheduledStop();
+    this.pendingStopMs = targetMs;
+
+    if (!this.audioElement) return;
+
+    const listener = () => {
+      if (this.pendingStopMs === null) return;
+      if (this.currentTimeMs >= this.pendingStopMs) {
+        this.pause();
+      }
+    };
+    this.pendingStopListener = listener;
+    this.audioElement.addEventListener("timeupdate", listener);
+  }
+
+  clearScheduledStop(): void {
+    this.pendingStopMs = null;
+    if (this.pendingStopListener && this.audioElement) {
+      this.audioElement.removeEventListener("timeupdate", this.pendingStopListener);
+    }
+    this.pendingStopListener = null;
+  }
+
   async resume() {
+    this.clearScheduledStop();
     if (this.audioElement) {
       // 确保 AudioContext 处于运行状态
       if (this.audioCtx.state === "suspended") {

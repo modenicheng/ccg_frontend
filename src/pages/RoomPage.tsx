@@ -108,6 +108,7 @@ function RoomPage() {
   const [isJudging, setIsJudging] = useState<boolean>(false);
   const [hasJudgingSubmitted, setHasJudgingSubmitted] = useState<boolean>(false);
   const [description, setDescription] = useState<string>("");
+  const [answerDeadline, setAnswerDeadline] = useState<number | null>(null);
   const [currentSong, setCurrentSong] = useState<{
     title: string;
     artist: string;
@@ -869,6 +870,7 @@ function RoomPage() {
       setCurrentAudioUrl,
       setNeedsGesturePromptOnInit,
       setDescription,
+      setAnswerDeadline,
       syncAnswerQueueState,
       addAttemptOrder,
       applyRemoteProgress,
@@ -1119,6 +1121,7 @@ function RoomPage() {
         selectedTags={selectedTagByGroup}
         description={description}
         isWsDisconnected={isWsDisconnected}
+        answerDeadline={answerDeadline}
         onSelectTag={selectGroupTag}
         onDescriptionChange={setDescription}
         onToggleMinimize={toggleAnswerModal}
@@ -1127,6 +1130,7 @@ function RoomPage() {
 
       <AnswerModalFloatingButton
         isVisible={isAnswerModalOpen && isAnswerModalMinimized}
+        answerDeadline={answerDeadline}
         onClick={toggleAnswerModal}
       />
 

@@ -68,6 +68,7 @@ export interface RoomStateData {
   round_scored: boolean;
   round_answers: RoundAnswerItem[];
   playback_status: PlaybackState | null;
+  answer_deadline?: number;
   scores: Array<{
     player_id: number;
     round_index: number;
@@ -131,6 +132,7 @@ export interface AttemptAnswerMessage {
 
 export interface YourTurnMessageData {
   user_id: number;
+  answer_deadline?: number;
 }
 
 export interface YourTurnMessage {

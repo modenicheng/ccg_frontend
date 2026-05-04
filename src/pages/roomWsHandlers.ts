@@ -42,7 +42,27 @@ import {
   applyScoreDeltaUpdate,
 } from "../utils/gameHelpers";
 
+const AUDIO_SYNC_THRESHOLD_MS = 20;
 const PRELOAD_DEDUP_WINDOW_MS = 3000;
+
+function playTurnNotification() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 660;
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.25);
+    osc.onended = () => ctx.close();
+  } catch {
+    // 忽略音频提示音错误（不影响核心功能）
+  }
+}
 
 export interface PlayerAnswer {
   playerId: number;
@@ -115,6 +135,7 @@ export interface RoomWsHandlerContext {
   setIsRoundSummaryOpen?: Dispatch<SetStateAction<boolean>>;
   setNeedsGesturePromptOnInit?: Dispatch<SetStateAction<boolean>>;
   setDescription?: Dispatch<SetStateAction<string>>;
+  setAnswerDeadline?: Dispatch<SetStateAction<number | null>>;
 
   // Callbacks (shared — required)
   syncAnswerQueueState: (queue: AnswerQueueItem[], tailPlayerId: number | null) => void;
@@ -183,6 +204,7 @@ export function registerRoomEventHandlers(
     setCurrentAudioUrl,
     setNeedsGesturePromptOnInit = noop,
     setDescription = noop,
+    setAnswerDeadline = noop,
     syncAnswerQueueState,
     addAttemptOrder = noop,
     applyRemoteProgress,
@@ -318,6 +340,12 @@ export function registerRoomEventHandlers(
       const ownerName = ownerPlayer?.username || "-";
       setRoomOwner(ownerName);
       setOnlinePlayers(payload.players);
+      // ROOM_STATE 携带 answer_deadline 以支持刷新恢复倒计时
+      if (payload.answer_deadline && payload.answer_deadline > 0) {
+        setAnswerDeadline(payload.answer_deadline);
+      } else {
+        setAnswerDeadline(null);
+      }
       setAnswerOrderByUserId(
         payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
           const order =
@@ -543,11 +571,16 @@ export function registerRoomEventHandlers(
   // ── YOUR_TURN ──────────────────────────────────────────────────────
   ws.onJsonEvent<YourTurnMessage>(GameEventId.YOUR_TURN, (message) => {
     const turnUserId = message?.data?.user_id;
+    const deadline = message?.data?.answer_deadline;
     if (typeof turnUserId === "number") {
       setCurrentAnsweringPlayer(turnUserId);
+      if (typeof deadline === "number" && deadline > 0) {
+        setAnswerDeadline(deadline);
+      }
       if (turnUserId === userIdRef.current) {
         setIsAnswerModalOpen(true);
         setIsAnswerModalMinimized(false);
+        playTurnNotification();
       }
     }
   });
@@ -848,8 +881,20 @@ export function registerRoomEventHandlers(
         }
 
         await withPlaybackSyncSuppressed(async () => {
-          applyRemoteProgress(message, true);
-          await audioRef.current?.pause();
+          const player = audioRef.current;
+          if (!player) return;
+
+          const targetMs = message.data.progress_ms;
+          const currentMs = player.currentTimeMs;
+
+          if (currentMs >= targetMs - AUDIO_SYNC_THRESHOLD_MS) {
+            // 已在目标位置或已越过，立即暂停并校准
+            applyRemoteProgress(message, true);
+            await player.pause();
+          } else {
+            // 还没到目标位置：不 seek，继续播放直到到达目标进度后才暂停
+            player.scheduleStopAt(targetMs);
+          }
         });
       } catch (err) {
         console.error("[PAUSE_EVENT] Failed to apply PAUSE event:", err);

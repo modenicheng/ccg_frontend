@@ -1,7 +1,9 @@
-import { Icon } from "@iconify-icon/react";
+import { useEffect, useState, useRef } from "react";
 import type { RefObject } from "react";
 import { TagGroupSelector } from "./TagGroupSelector";
 import type { WsTagGroup } from "../types/wsMessages";
+
+const ANSWER_TIME_LIMIT_MS = 30_000;
 
 interface AnswerModalProps {
   dialogRef: RefObject<HTMLDialogElement | null>;
@@ -10,6 +12,7 @@ interface AnswerModalProps {
   selectedTags: Record<number, number | null>;
   description: string;
   isWsDisconnected: boolean;
+  answerDeadline: number | null;
   onSelectTag: (groupId: number, tagId: number) => void;
   onDescriptionChange: (desc: string) => void;
   onToggleMinimize: () => void;
@@ -23,11 +26,48 @@ export function AnswerModal({
   selectedTags,
   description,
   isWsDisconnected,
+  answerDeadline,
   onSelectTag,
   onDescriptionChange,
   onToggleMinimize,
   onSubmit,
 }: AnswerModalProps) {
+  const [remainingMs, setRemainingMs] = useState(ANSWER_TIME_LIMIT_MS);
+  const submittedRef = useRef(false);
+
+  useEffect(() => {
+    if (!isOpen || !answerDeadline) {
+      setRemainingMs(ANSWER_TIME_LIMIT_MS);
+      submittedRef.current = false;
+      return;
+    }
+
+    const tick = () => {
+      const now = Date.now();
+      const remaining = Math.max(0, answerDeadline - now);
+      setRemainingMs(remaining);
+      if (remaining <= 0 && !submittedRef.current) {
+        submittedRef.current = true;
+        onSubmit();
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 100);
+    return () => clearInterval(interval);
+  }, [isOpen, answerDeadline, onSubmit]);
+
+  const progressPercent = answerDeadline
+    ? Math.max(0, Math.min(100, (remainingMs / ANSWER_TIME_LIMIT_MS) * 100))
+    : 100;
+
+  const barColor =
+    remainingMs > 10_000
+      ? "bg-success"
+      : remainingMs > 5_000
+        ? "bg-warning"
+        : "bg-error";
+
   return (
     <dialog
       ref={dialogRef}
@@ -35,7 +75,20 @@ export function AnswerModal({
       open={isOpen}
     >
       <div className="modal-box w-11/12 max-w-4xl">
-        <h2 className="font-bold text-2xl">答题</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-bold text-2xl">答题</h2>
+          <span className="countdown font-mono text-xl">
+            {Math.ceil(remainingMs / 1000)}s
+          </span>
+        </div>
+
+        <div className="w-full h-2 bg-base-300 rounded-full overflow-hidden mb-4">
+          <div
+            className={`h-full rounded-full transition-[width] duration-100 ${barColor}`}
+            style={{ width: `${progressPercent}%` }}
+          />
+        </div>
+
         <div className="divider mt-0.5 mb-4"></div>
 
         <TagGroupSelector
@@ -71,7 +124,10 @@ export function AnswerModal({
             type="button"
             className="btn btn-primary"
             disabled={isWsDisconnected}
-            onClick={onSubmit}
+            onClick={() => {
+              submittedRef.current = true;
+              onSubmit();
+            }}
           >
             提交答案
           </button>
@@ -86,26 +142,88 @@ export function AnswerModal({
 
 interface AnswerModalFloatingButtonProps {
   isVisible: boolean;
+  answerDeadline: number | null;
   onClick: () => void;
 }
 
 export function AnswerModalFloatingButton({
   isVisible,
+  answerDeadline,
   onClick,
 }: AnswerModalFloatingButtonProps) {
+  const [remainingMs, setRemainingMs] = useState(ANSWER_TIME_LIMIT_MS);
+
+  useEffect(() => {
+    if (!isVisible || !answerDeadline) {
+      setRemainingMs(ANSWER_TIME_LIMIT_MS);
+      return;
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, answerDeadline - Date.now());
+      setRemainingMs(remaining);
+    };
+
+    tick();
+    const interval = setInterval(tick, 200);
+    return () => clearInterval(interval);
+  }, [isVisible, answerDeadline]);
+
   if (!isVisible) return null;
+
+  const progressPercent = answerDeadline
+    ? Math.max(0, Math.min(100, (remainingMs / ANSWER_TIME_LIMIT_MS) * 100))
+    : 100;
+
+  const circleColor =
+    remainingMs > 10_000
+      ? "text-success"
+      : remainingMs > 5_000
+        ? "text-warning"
+        : "text-error";
+
+  const radius = 22;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - progressPercent / 100);
 
   return (
     <button
       type="button"
-      className="fixed bottom-6 right-6 btn btn-primary btn-circle h-16 w-16 shadow-lg"
+      className="fixed bottom-6 right-6 btn btn-primary btn-circle h-16 w-16 shadow-lg relative"
       onClick={onClick}
     >
-      <Icon
-        icon="heroicons:clipboard-question-mark"
-        width={24}
-        height={24}
-      />
+      <svg
+        className={`absolute inset-0 pointer-events-none ${circleColor}`}
+        width="64"
+        height="64"
+        viewBox="0 0 64 64"
+      >
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          opacity="0.2"
+        />
+        <circle
+          cx="32"
+          cy="32"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform="rotate(-90 32 32)"
+          style={{ transition: "stroke-dashoffset 0.2s linear" }}
+        />
+      </svg>
+      <span className="font-mono text-xs font-bold">
+        {Math.ceil(remainingMs / 1000)}
+      </span>
     </button>
   );
 }
