@@ -122,6 +122,9 @@ export interface AttemptAnswerMessageData {
   offset_ts: number;
   progress_ms: number;
   user_id: number;
+  /** Answer queue snapshot (optional, included for authoritative frontend queue sync) */
+  queue?: AnswerQueueItem[];
+  answer_queue_tail_player_id?: number | null;
 }
 
 export interface AttemptAnswerMessage {

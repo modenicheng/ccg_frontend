@@ -291,17 +291,30 @@ export function registerRoomEventHandlers(
       const playProgress = payload.playback_status?.progress_ms || 0;
       const startPositionPercent = payload.song_start_range_percent || 0;
 
+      const roundStateCode =
+        typeof payload.round_state === "number" ? payload.round_state : 0;
+      const roundStateName = (() => {
+        switch (roundStateCode) {
+          case 1:
+            return "PLAYING_AUDIO";
+          case 2:
+            return "ANSWERING";
+          case 3:
+            return "JUDGING";
+          case 4:
+            return "COMPLETED";
+          default:
+            return "PENDING";
+        }
+      })();
+
       const nextRoomState: RoomState = {
         roomId: payload.room_id,
         title: payload.title,
         status: mapStatusCodeToStatus(payload.status),
         statusCode: payload.status,
-        roundState:
-          typeof payload.round_state === "string"
-            ? payload.round_state
-            : "PENDING",
-        roundStateCode:
-          typeof payload.round_state === "number" ? payload.round_state : 0,
+        roundState: roundStateName,
+        roundStateCode,
         show_answer: payload.show_answer ?? false,
         song_start_range_percent: payload.song_start_range_percent,
         players: payload.players,
@@ -321,6 +334,10 @@ export function registerRoomEventHandlers(
       };
 
       gameStore.getState().setRoomState(nextRoomState);
+      gameStore.getState().setRoundState(
+        nextRoomState.roundState,
+        nextRoomState.roundStateCode,
+      );
 
       const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
         (acc, item) => {
@@ -570,6 +587,13 @@ export function registerRoomEventHandlers(
         return;
       }
       addAttemptOrder(attemptedUserId);
+      // If server includes authoritative queue data, sync it
+      if (message.data.queue && message.data.queue.length > 0) {
+        syncAnswerQueueState(
+          message.data.queue,
+          message.data.answer_queue_tail_player_id ?? null,
+        );
+      }
     },
   );
 

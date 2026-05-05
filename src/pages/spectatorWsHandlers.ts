@@ -88,6 +88,7 @@ export interface SpectatorWsHandlerContext {
   gameStoreGetState: () => {
     roomState: RoomState | null;
     setRoomState: (state: RoomState) => void;
+    setRoundState: (roundState: RoomState["roundState"], roundStateCode: RoomState["roundStateCode"]) => void;
     setScores: (scores: PlayerScore[]) => void;
   };
 }
@@ -172,6 +173,10 @@ export function registerSpectatorEventHandlers(
       };
 
       ctx.gameStoreGetState().setRoomState(nextRoomState);
+      ctx.gameStoreGetState().setRoundState(
+        nextRoomState.roundState,
+        nextRoomState.roundStateCode,
+      );
 
       const scoreByPlayerId = payload.scores.reduce<Record<number, number>>(
         (acc, item) => {
@@ -315,6 +320,13 @@ export function registerSpectatorEventHandlers(
         const nextOrder = Math.max(0, ...Object.values(prev)) + 1;
         return { ...prev, [attemptedUserId]: nextOrder };
       });
+      // If server includes authoritative queue data, sync it
+      if (message.data.queue && message.data.queue.length > 0) {
+        ctx.syncAnswerQueueState(
+          message.data.queue,
+          message.data.answer_queue_tail_player_id ?? null,
+        );
+      }
     }),
   );
 
