@@ -96,6 +96,7 @@ function RoomPage() {
       : null);
 
   const roomState = useGameStore((state) => state.roomState);
+  const roundState = useGameStore((state) => state.roundState);
   const roundStateCode = useGameStore((state) => state.roundStateCode);
   const scores = useGameStore((state) => state.scores);
   const [roomOwner, setRoomOwner] = useState<string>("-");
@@ -1034,6 +1035,8 @@ function RoomPage() {
           isPlaybackStateMissing={isPlaybackStateMissing}
           isWsDisconnected={isWsDisconnected}
           isJudging={isJudging}
+          roundState={roundState}
+          roundStateCode={roundStateCode}
           roomState={roomState}
           judgingDialogRef={judgingDialogRef}
           onTogglePlayPause={handleTogglePlayPause}

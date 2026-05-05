@@ -9,6 +9,8 @@ interface OwnerControlsProps {
   isPlaybackStateMissing: boolean;
   isWsDisconnected: boolean;
   isJudging: boolean;
+  roundState: string;
+  roundStateCode: number;
   roomState: RoomState | undefined;
   judgingDialogRef: React.RefObject<HTMLDialogElement | null>;
   onTogglePlayPause: () => void;
@@ -24,6 +26,8 @@ export function OwnerControls({
   isPlaybackStateMissing,
   isWsDisconnected,
   isJudging,
+  roundState,
+  roundStateCode,
   roomState,
   judgingDialogRef,
   onTogglePlayPause,
@@ -37,7 +41,7 @@ export function OwnerControls({
   if (!isOwner) return null;
 
   const isRoundCompleted =
-    roomState?.roundState === "COMPLETED" || roomState?.roundStateCode === 4;
+    roundState === "COMPLETED" || roundStateCode === 4;
   const canEnterNextRoundDirectly = isRoundCompleted && !isJudging;
 
   const handleNextRoundClick = () => {
