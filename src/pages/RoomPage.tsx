@@ -304,7 +304,7 @@ function RoomPage() {
     const activeQueue = getActiveAnswerQueue(queue, answerQueueTailPlayerId);
 
     setAnswerOrderByUserId(
-      activeQueue.reduce<Record<number, number>>((acc, item, index) => {
+      queue.reduce<Record<number, number>>((acc, item, index) => {
         const order = item.order ?? index + 1;
         acc[item.player_id] = order;
         return acc;

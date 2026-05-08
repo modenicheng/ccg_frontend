@@ -361,9 +361,11 @@ export function registerRoomEventHandlers(
       // ROOM_STATE 携带 answer_deadline 以支持刷新恢复倒计时
       if (payload.answer_deadline && payload.answer_deadline > 0) {
         setAnswerDeadline(payload.answer_deadline);
-      } else {
+      } else if (payload.answer_deadline === 0) {
+        // 后端明确传 0 表示无有效截止时间，清除倒计时
         setAnswerDeadline(null);
       }
+      // else: 字段不存在时保留已有 deadline 不变（避免刷新后误清除）
       setAnswerOrderByUserId(
         payload.answer_queue.reduce<Record<number, number>>((acc, item) => {
           const order =
@@ -1184,6 +1186,7 @@ export function registerRoomEventHandlers(
       setIsAnswerModalMinimized(false);
       setDescription("");
       setCurrentAnsweringPlayer(null);
+      setAnswerDeadline(null);
       setIsJudging(false);
       setHasJudgingSubmitted(false);
       setCurrentSong(null);
